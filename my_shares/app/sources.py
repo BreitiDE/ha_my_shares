@@ -140,6 +140,20 @@ class Fetcher:
         except ValueError as e:
             raise SourceError("error", "Antwort ist kein JSON") from e
 
+    # ---------- Wechselkurse (EZB) ----------
+    async def ecb(self):
+        from fx import ECB_URL, parse_ecb
+        try:
+            r = await self.s.get(ECB_URL)
+        except Exception as e:  # noqa: BLE001
+            raise SourceError("error", f"EZB nicht erreichbar ({type(e).__name__})") from e
+        if r.status_code != 200:
+            raise SourceError("error", f"EZB: HTTP {r.status_code}")
+        try:
+            return parse_ecb(r.text)
+        except ValueError as e:
+            raise SourceError("error", str(e)) from e
+
     # ---------- Suche: WKN / ISIN / Symbol ----------
     async def lookup(self, query):
         q = query.strip().upper().replace(" ", "")

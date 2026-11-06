@@ -10,6 +10,22 @@ Die WKN wird über OpenFIGI einem Börsensymbol zugeordnet (z. B. 716460 → `SA
 Passt die Zuordnung nicht, lässt sich das Symbol in den Details ändern. Die Stückzahl ist optional
 und wird für den Depotwert gebraucht.
 
+## Depot und Beobachten
+
+- **Depot:** Aktien, die Du besitzt. Mit Stückzahl zeigt die Übersicht den Depotwert, mit Kaufkurs auch
+  Gewinn und Verlust.
+- **Beobachten:** Aktien, die Du im Blick behalten willst. Optional mit Wunschkurs; ist er erreicht,
+  wird die Zeile markiert.
+- Mit dem Knopf in jeder Zeile (oder im Detail-Dialog) verschiebst Du eine Aktie. Ins Depot fragt die App
+  Stückzahl und optional den Kaufkurs ab, beim Verschieben zu Beobachten werden beide entfernt.
+
+## Währung
+
+Unter **Einstellungen → Darstellung** wählst Du Euro oder US-Dollar. Alle Beträge (Kurs, Kursziel,
+Depotwert, Kauf- und Wunschkurs) werden mit den Referenzkursen der Europäischen Zentralbank umgerechnet.
+Die Kurse werden alle 6 Stunden geholt; die EZB veröffentlicht sie werktags gegen 16 Uhr.
+Kauf- und Wunschkurs gibst Du in der gewählten Währung ein.
+
 ## Quellen
 
 | Quelle | Zugang | Liefert |

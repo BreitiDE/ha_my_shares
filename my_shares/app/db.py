@@ -16,7 +16,11 @@ DEFAULTS = {
     "buy_threshold": 6.5,
     "sell_threshold": 3.5,
     "language": "auto",
+    "currency": "EUR",
 }
+
+LISTS = ("depot", "watch")
+CURRENCIES = ("EUR", "USD")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS shares(
@@ -29,7 +33,10 @@ CREATE TABLE IF NOT EXISTS shares(
   score REAL, score_prev REAL, nsources INTEGER DEFAULT 0, analysts INTEGER DEFAULT 0,
   sources TEXT,
   updated_at TEXT, error TEXT,
-  added_at TEXT NOT NULL
+  added_at TEXT NOT NULL,
+  list TEXT NOT NULL DEFAULT 'depot',
+  buy_price REAL, buy_currency TEXT,
+  wish_price REAL, wish_currency TEXT
 );
 CREATE TABLE IF NOT EXISTS history(share_id INTEGER NOT NULL, ts TEXT NOT NULL, score REAL, price REAL);
 CREATE INDEX IF NOT EXISTS history_share ON history(share_id, ts);
@@ -38,7 +45,15 @@ CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT NOT NULL);
 """
 
 SHARE_COLS = ("id", "ident", "symbol", "name", "exchange", "currency", "quantity", "price", "change_pct",
-              "target", "score", "score_prev", "nsources", "analysts", "sources", "updated_at", "error", "added_at")
+              "target", "score", "score_prev", "nsources", "analysts", "sources", "updated_at", "error", "added_at",
+              "list", "buy_price", "buy_currency", "wish_price", "wish_currency")
+
+# Spalten, die nach 1.0.0 dazugekommen sind (werden bei bestehenden Datenbanken ergänzt)
+MIGRATIONS = [
+    ("list", "TEXT NOT NULL DEFAULT 'depot'"),
+    ("buy_price", "REAL"), ("buy_currency", "TEXT"),
+    ("wish_price", "REAL"), ("wish_currency", "TEXT"),
+]
 
 
 def now_iso():
@@ -53,6 +68,10 @@ class DB:
         self.lock = threading.Lock()
         with self.lock:
             self.con.executescript(SCHEMA)
+            have = {r["name"] for r in self.con.execute("PRAGMA table_info(shares)")}
+            for col, decl in MIGRATIONS:
+                if col not in have:
+                    self.con.execute(f"ALTER TABLE shares ADD COLUMN {col} {decl}")
             self.con.commit()
 
     # ---------- Einstellungen ----------
@@ -104,15 +123,22 @@ class DB:
         return self._row(r) if r else None
 
     def find_symbol(self, symbol):
-        with self.lock:
-            r = self.con.execute("SELECT id FROM shares WHERE upper(symbol)=upper(?)", (symbol,)).fetchone()
+        r = self.find_symbol_row(symbol)
         return r["id"] if r else None
 
-    def add_share(self, ident, symbol, name, exchange, quantity):
+    def find_symbol_row(self, symbol):
         with self.lock:
-            cur = self.con.execute(
-                "INSERT INTO shares(ident, symbol, name, exchange, quantity, added_at) VALUES(?,?,?,?,?,?)",
-                (ident, symbol, name, exchange, quantity, now_iso()))
+            r = self.con.execute("SELECT id, list FROM shares WHERE upper(symbol)=upper(?)", (symbol,)).fetchone()
+        return dict(r) if r else None
+
+    def add_share(self, ident, symbol, name, exchange, lst="depot", **extra):
+        fields = {"ident": ident, "symbol": symbol, "name": name, "exchange": exchange, "list": lst,
+                  "added_at": now_iso()}
+        fields.update({k: v for k, v in extra.items() if k in SHARE_COLS})
+        cols = ", ".join(fields)
+        marks = ", ".join("?" for _ in fields)
+        with self.lock:
+            cur = self.con.execute(f"INSERT INTO shares({cols}) VALUES({marks})", tuple(fields.values()))
             self.con.commit()
             return cur.lastrowid
 

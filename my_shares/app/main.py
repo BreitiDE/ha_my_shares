@@ -7,10 +7,11 @@ from datetime import datetime, timedelta
 
 from aiohttp import web
 
-from db import DB, DEFAULTS, now_iso
+from db import CURRENCIES, DB, DEFAULTS, LISTS, now_iso
+from fx import convert
 from sources import SOURCE_KEYS, Fetcher, SourceError, evaluate
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 PORT = int(os.environ.get("PORT", "8099"))
 WWW = os.path.join(os.path.dirname(os.path.abspath(__file__)), "www")
@@ -30,6 +31,31 @@ class Engine:
         self.queue = set()
         self.next_run = None
         self.wake = asyncio.Event()
+        self.fx = db.meta("fx")
+        self.fx_try = None
+
+    # ---------- Wechselkurse ----------
+    async def update_fx(self, force=False):
+        """EZB-Kurse holen: höchstens alle 6 h, nach Fehler frühestens nach 30 min erneut."""
+        now = datetime.now()
+        if not force and self.fx and self.fx.get("fetched"):
+            if now - datetime.fromisoformat(self.fx["fetched"]) < timedelta(hours=6):
+                return
+        if not force and self.fx_try and now - self.fx_try < timedelta(minutes=30):
+            return
+        self.fx_try = now
+        f = Fetcher()
+        try:
+            fx = await f.ecb()
+            fx["fetched"] = now_iso()
+            self.fx = fx
+            self.db.set_meta("fx", fx)
+            self.fx_try = None
+            log.info("EZB-Kurse vom %s geladen (1 EUR = %.4f USD)", fx["date"], fx["rates"]["USD"])
+        except SourceError as e:
+            log.warning("Wechselkurse: %s", e.msg)
+        finally:
+            await f.close()
 
     # ---------- Zeitplan ----------
     def compute_next(self):
@@ -51,12 +77,14 @@ class Engine:
 
     async def scheduler(self):
         self.compute_next()
+        await self.update_fx()
         while True:
             try:
                 await asyncio.wait_for(self.wake.wait(), timeout=20)
             except asyncio.TimeoutError:
                 pass
             self.wake.clear()
+            await self.update_fx()
             if self.next_run and datetime.now() >= self.next_run and not self.running:
                 log.info("Geplanter Lauf startet")
                 self.compute_next()
@@ -84,6 +112,7 @@ class Engine:
         self.running = True
         self.progress = {"done": 0, "total": len(shares), "current": ""}
         settings = self.db.settings()
+        await self.update_fx()
         f = Fetcher()
         errors = 0
         try:
@@ -131,28 +160,60 @@ def public_settings(s):
     return out
 
 
+def display(x, cur, fx):
+    """Geldwerte einer Aktie in der Anzeigewährung (None, wenn kein Kurs bekannt)."""
+    c = x.get("currency")
+    price = convert(x.get("price"), c, cur, fx)
+    d = {"price": price, "target": convert(x.get("target"), c, cur, fx), "fx_ok": price is not None or not x.get("price")}
+    d["buy"] = convert(x.get("buy_price"), x.get("buy_currency") or cur, cur, fx)
+    d["wish"] = convert(x.get("wish_price"), x.get("wish_currency") or cur, cur, fx)
+    q = x.get("quantity") or 0
+    d["value"] = q * price if q and price is not None else None
+    d["pl"] = d["pl_pct"] = None
+    if d["value"] is not None and d["buy"]:
+        cost = q * d["buy"]
+        d["pl"], d["pl_pct"] = d["value"] - cost, d["value"] / cost - 1
+    d["wish_gap"] = price / d["wish"] - 1 if price and d["wish"] else None
+    return d
+
+
 def stats(shares, s):
-    scored = [x for x in shares if x["score"] is not None]
-    counts = {"buy": 0, "hold": 0, "sell": 0, "none": 0}
-    for x in shares:
-        counts[label(x["score"], s)] += 1
-    depot = {}
-    for x in shares:
-        if x.get("quantity") and x.get("price"):
-            cur = x.get("currency") or "EUR"
-            depot[cur] = depot.get(cur, 0) + x["quantity"] * x["price"]
-    # Gesamtbewertung: nach Depotwert gewichtet, wenn Stückzahlen da sind, sonst einfacher Mittelwert
-    wsum = sum(x["quantity"] * x["price"] for x in scored if x.get("quantity") and x.get("price"))
-    if wsum and len({x.get("currency") for x in scored if x.get("quantity")}) <= 1:
-        avg = sum(x["score"] * x["quantity"] * x["price"] for x in scored if x.get("quantity") and x.get("price")) / wsum
-        weighted = True
-    else:
-        avg = sum(x["score"] for x in scored) / len(scored) if scored else None
-        weighted = False
-    last = max([x["updated_at"] for x in shares if x.get("updated_at")] or [None])
-    return {"count": len(shares), "avg": round(avg, 1) if avg is not None else None, "weighted": weighted,
-            "counts": counts, "depot": depot, "last_update": last,
-            "errors": sum(1 for x in shares if x.get("error"))}
+    out = {}
+    for lst in LISTS:
+        items = [x for x in shares if x.get("list") == lst]
+        scored = [x for x in items if x["score"] is not None]
+        counts = {"buy": 0, "hold": 0, "sell": 0, "none": 0}
+        for x in items:
+            counts[label(x["score"], s)] += 1
+        value = cost = covered = wnum = wsum = 0.0
+        missing = 0
+        for x in items:
+            d = x["disp"]
+            if lst != "depot" or not x.get("quantity") or not x.get("price"):
+                continue
+            if d["value"] is None:
+                missing += 1
+                continue
+            value += d["value"]
+            if x["score"] is not None:
+                wsum += d["value"]
+                wnum += d["value"] * x["score"]
+            if d["pl"] is not None:
+                cost += d["value"] - d["pl"]
+                covered += d["value"]
+        if wsum:
+            avg, weighted = wnum / wsum, True
+        else:
+            avg = sum(x["score"] for x in scored) / len(scored) if scored else None
+            weighted = False
+        last = max([x["updated_at"] for x in items if x.get("updated_at")] or [None])
+        out[lst] = {
+            "count": len(items), "avg": round(avg, 1) if avg is not None else None, "weighted": weighted,
+            "counts": counts, "value": value if value else None, "fx_missing": missing,
+            "pl": covered - cost if cost else None, "pl_pct": covered / cost - 1 if cost else None,
+            "wish_hits": sum(1 for x in items if x["disp"]["wish_gap"] is not None and x["disp"]["wish_gap"] <= 0),
+            "last_update": last, "errors": sum(1 for x in items if x.get("error"))}
+    return out
 
 
 def json_error(msg, status=400):
@@ -197,19 +258,23 @@ def make_app(db, engine):
         shares = db.shares()
         for x in shares:
             x["label"] = label(x["score"], s)
+            x["disp"] = display(x, s["currency"], engine.fx)
         user = request.headers.get("X-Remote-User-Display-Name") or request.headers.get("X-Remote-User-Name") or ""
         return web.json_response({
             "version": VERSION, "user": user, "running": engine.running, "progress": engine.progress,
             "queued": bool(engine.queue), "next_run": engine.next_run.isoformat() if engine.next_run else None,
             "last_run": db.meta("last_run"), "settings": public_settings(s), "stats": stats(shares, s),
-            "shares": shares, "now": now_iso()})
+            "fx": {"date": (engine.fx or {}).get("date"), "usd": ((engine.fx or {}).get("rates") or {}).get("USD")},
+            "currency": s["currency"], "shares": shares, "now": now_iso()})
 
     @routes.get("/api/shares/{id}")
     async def share_detail(request):
         sh = db.share(int(request.match_info["id"]))
         if not sh:
             return json_error("Aktie nicht gefunden", 404)
-        sh["label"] = label(sh["score"], db.settings())
+        st = db.settings()
+        sh["label"] = label(sh["score"], st)
+        sh["disp"] = display(sh, st["currency"], engine.fx)
         sh["history"] = db.history(sh["id"])
         return web.json_response(sh)
 
@@ -227,19 +292,37 @@ def make_app(db, engine):
         finally:
             await f.close()
         for r in res:
-            r["exists"] = db.find_symbol(r["symbol"]) is not None
+            row = db.find_symbol_row(r["symbol"])
+            r["exists"] = row["list"] if row else None
         return web.json_response({"results": res})
 
-    def parse_qty(v):
+    def parse_num(v, what):
         if v in (None, ""):
             return None
+        txt = str(v).strip().replace(" ", "")
+        if "," in txt:                      # deutsche Schreibweise 1.234,56
+            txt = txt.replace(".", "").replace(",", ".")
         try:
-            q = float(str(v).replace(",", "."))
+            q = float(txt)
         except ValueError:
-            raise ValueError("Stückzahl ist keine Zahl") from None
+            raise ValueError(f"{what} ist keine Zahl") from None
         if q < 0:
-            raise ValueError("Stückzahl darf nicht negativ sein")
+            raise ValueError(f"{what} darf nicht negativ sein")
         return q
+
+    def parse_qty(v):
+        return parse_num(v, "Stückzahl")
+
+    def money_fields(b, cur):
+        """Kaufkurs/Wunschkurs aus dem Body, gespeichert in der aktuellen Anzeigewährung."""
+        out = {}
+        if "buy_price" in b:
+            out["buy_price"] = parse_num(b["buy_price"], "Kaufkurs")
+            out["buy_currency"] = cur if out["buy_price"] is not None else None
+        if "wish_price" in b:
+            out["wish_price"] = parse_num(b["wish_price"], "Wunschkurs")
+            out["wish_currency"] = cur if out["wish_price"] is not None else None
+        return out
 
     @routes.post("/api/shares")
     async def add_share(request):
@@ -247,14 +330,26 @@ def make_app(db, engine):
         symbol = str(b.get("symbol") or "").strip().upper()
         if not re.match(r"^[A-Z0-9.\-=^]{1,20}$", symbol):
             return json_error("Ungültiges Symbol")
-        if db.find_symbol(symbol):
-            return json_error(f"{symbol} ist schon in der Liste")
+        row = db.find_symbol_row(symbol)
+        if row:
+            where = "im Depot" if row["list"] == "depot" else "unter Beobachten"
+            return json_error(f"{symbol} ist schon {where}")
+        lst = b.get("list") or "depot"
+        if lst not in LISTS:
+            return json_error("Unbekannte Liste")
+        cur = db.settings()["currency"]
         try:
-            qty = parse_qty(b.get("quantity"))
+            extra = money_fields(b, cur)
+            if lst == "depot":
+                extra["quantity"] = parse_qty(b.get("quantity"))
+                extra.pop("wish_price", None), extra.pop("wish_currency", None)
+            else:
+                extra.pop("buy_price", None), extra.pop("buy_currency", None)
         except ValueError as e:
             return json_error(str(e))
         sid = db.add_share(str(b.get("ident") or symbol).strip().upper()[:20], symbol,
-                           str(b.get("name") or "")[:120] or None, str(b.get("exchange") or "")[:40] or None, qty)
+                           str(b.get("name") or "")[:120] or None, str(b.get("exchange") or "")[:40] or None,
+                           lst, **extra)
         engine.request([sid])
         return web.json_response({"id": sid})
 
@@ -266,11 +361,19 @@ def make_app(db, engine):
             return json_error("Aktie nicht gefunden", 404)
         b = await request.json()
         fields = {}
-        if "quantity" in b:
-            try:
+        try:
+            if "quantity" in b:
                 fields["quantity"] = parse_qty(b.get("quantity"))
-            except ValueError as e:
-                return json_error(str(e))
+            money = money_fields(b, db.settings()["currency"])
+            # Kaufkurs nur neu speichern, wenn er sich geändert hat (sonst bleibt die ursprüngliche Währung)
+            for k in ("buy", "wish"):
+                if f"{k}_price" in money:
+                    old = display(sh, db.settings()["currency"], engine.fx)[k]
+                    new = money[f"{k}_price"]
+                    if old is None or new is None or abs(old - new) > 0.005:
+                        fields[f"{k}_price"], fields[f"{k}_currency"] = new, money[f"{k}_currency"]
+        except ValueError as e:
+            return json_error(str(e))
         recalc = False
         if "symbol" in b:
             sym = str(b["symbol"] or "").strip().upper()
@@ -278,13 +381,38 @@ def make_app(db, engine):
                 return json_error("Ungültiges Symbol")
             other = db.find_symbol(sym)
             if other and other != sid:
-                return json_error(f"{sym} ist schon in der Liste")
+                return json_error(f"{sym} ist schon in einer Liste")
             if sym != sh["symbol"]:
                 fields.update(symbol=sym, exchange=None)
                 recalc = True
         db.update_share(sid, **fields)
         if recalc:
             engine.request([sid])
+        return web.json_response({"ok": True})
+
+    @routes.post("/api/shares/{id}/move")
+    async def move_share(request):
+        sid = int(request.match_info["id"])
+        sh = db.share(sid)
+        if not sh:
+            return json_error("Aktie nicht gefunden", 404)
+        b = await request.json()
+        to = b.get("list")
+        if to not in LISTS:
+            return json_error("Unbekannte Liste")
+        if to == sh["list"]:
+            return json_error("Die Aktie ist schon in dieser Liste")
+        if to == "depot":
+            try:
+                qty = parse_qty(b.get("quantity"))
+                money = money_fields({"buy_price": b.get("buy_price")}, db.settings()["currency"])
+            except ValueError as e:
+                return json_error(str(e))
+            if not qty:
+                return json_error("Bitte die Stückzahl angeben")
+            db.update_share(sid, list="depot", quantity=qty, wish_price=None, wish_currency=None, **money)
+        else:
+            db.update_share(sid, list="watch", quantity=None, buy_price=None, buy_currency=None)
         return web.json_response({"ok": True})
 
     @routes.post("/api/shares/delete")
@@ -352,12 +480,20 @@ def make_app(db, engine):
             if not (0 <= sell < buy <= 10):
                 return json_error("„Verkaufen bis“ muss kleiner sein als „Kaufen ab“ (0–10)")
             new["buy_threshold"], new["sell_threshold"] = buy, sell
+        new_currency = False
+        if "currency" in b:
+            if b["currency"] not in CURRENCIES:
+                return json_error("Unbekannte Währung")
+            new_currency = b["currency"] != cur.get("currency")
+            new["currency"] = b["currency"]
         if "language" in b:
             if b["language"] not in ("auto", "de", "en"):
                 return json_error("Unbekannte Sprache")
             new["language"] = b["language"]
         db.save_settings(new)
         engine.compute_next()
+        if new_currency and not engine.fx:
+            await engine.update_fx(force=True)
         return web.json_response(public_settings(db.settings()))
 
     app = web.Application(middlewares=[guard], client_max_size=64 * 1024)

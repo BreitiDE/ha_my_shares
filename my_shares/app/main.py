@@ -9,9 +9,9 @@ from aiohttp import web
 
 from db import CURRENCIES, DB, DEFAULTS, LISTS, now_iso
 from fx import convert
-from sources import SOURCE_KEYS, AVGate, Fetcher, SourceError, evaluate, ms_normalize
+from sources import SOURCE_KEYS, Fetcher, SourceError, evaluate, ms_normalize
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 PORT = int(os.environ.get("PORT", "8099"))
 WWW = os.path.join(os.path.dirname(os.path.abspath(__file__)), "www")
@@ -33,7 +33,6 @@ class Engine:
         self.wake = asyncio.Event()
         self.fx = db.meta("fx")
         self.fx_try = None
-        self.av = AVGate(db)
 
     # ---------- Wechselkurse ----------
     async def update_fx(self, force=False):
@@ -120,7 +119,7 @@ class Engine:
             for i, sh in enumerate(shares):
                 self.progress["current"] = sh.get("name") or sh["symbol"]
                 try:
-                    r = await evaluate(f, sh, settings, {"fx": self.fx, "av": self.av})
+                    r = await evaluate(f, sh, settings, {"fx": self.fx})
                     prev = sh["score"] if sh["score"] is not None else sh["score_prev"]
                     self.db.update_share(sh["id"], **r, score_prev=prev, updated_at=now_iso(), error=None)
                     self.db.add_history(sh["id"], r["score"], r["price"])
@@ -157,7 +156,6 @@ def label(score, s):
 def public_settings(s):
     out = {k: v for k, v in s.items() if not k.endswith("_key")}
     out["finnhub_key_set"] = bool(s.get("finnhub_key"))
-    out["av_key_set"] = bool(s.get("av_key"))
     return out
 
 
@@ -458,7 +456,7 @@ def make_app(db, engine):
         if "schedule_days" in b:
             days = sorted({int(d) for d in b["schedule_days"] if 0 <= int(d) <= 6})
             new["schedule_days"] = days
-        for k in ("finnhub_key", "av_key"):
+        for k in ("finnhub_key",):
             if b.get(k + "_clear"):
                 new[k] = ""
             elif b.get(k):

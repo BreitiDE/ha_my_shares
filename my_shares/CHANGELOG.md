@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.1
+
+- Alpha Vantage durch **Nasdaq** ersetzt: Alpha Vantage gibt Analystendaten nur noch mit Premium-Key heraus
+  („This is a premium endpoint“). Nasdaq liefert Kaufen/Halten/Verkaufen und Kursziel für US-Aktien ohne Key
+- Einstellung für den Alpha-Vantage-Key entfällt
+
 ## 1.2.0
 
 - Neue Quelle **MarketScreener**: Analystenkonsens, Zahl der Analysten und Kursziel für alle Aktien, auch Deutschland und Europa.

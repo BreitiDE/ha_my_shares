@@ -32,7 +32,7 @@ Kauf- und Wunschkurs gibst Du in der gewählten Währung ein.
 |---|---|---|
 | Yahoo Finance | ohne Key | Analystenkonsens (1–5), Kursziel, Kursverlauf – alle Aktien |
 | Finnhub | kostenloser Key ([finnhub.io](https://finnhub.io/register)) | Empfehlungen pro Monat – nur US-Aktien |
-| Alpha Vantage | kostenloser Key ([alphavantage.co](https://www.alphavantage.co/support/#api-key)) | Einstufungen, Kursziel – nur US-Aktien, 25 Abrufe/Tag |
+| Nasdaq | ohne Key | Kaufen/Halten/Verkaufen, Kursziel – nur US-Aktien |
 | MarketScreener | ohne Key | Konsens, Zahl der Analysten, Kursziel – alle Aktien |
 | Kursziel-Potenzial | aus den Analysten-Quellen | Abstand Kurs → mittleres Kursziel, ±30 % = 0 bzw. 10 |
 | Technik | aus dem Kursverlauf | 200-Tage-Linie, Momentum 3 und 12 Monate, RSI |
@@ -40,11 +40,11 @@ Kauf- und Wunschkurs gibst Du in der gewählten Währung ein.
 MarketScreener hat keine offizielle Schnittstelle; die App liest die öffentliche Konsens-Seite der Aktie
 (ein Abruf pro Aktie und Lauf). Die Seite wird beim ersten Lauf gesucht und am Kurs geprüft. Hat die App die
 falsche Aktie erwischt, trägst Du im Detail-Dialog die richtige Adresse ein (jede Sprachversion geht).
-Alpha Vantage speichert Ergebnisse 20 Stunden zwischen, damit „Neu berechnen“ das Tageslimit nicht aufbraucht.
+Nasdaq hat ebenfalls keine offizielle Schnittstelle; die App nutzt die öffentlichen Analystendaten von nasdaq.com.
 
 Jede Quelle wird auf 0–10 umgerechnet. Der Index ist der gewichtete Mittelwert der Quellen, die Daten
 liefern. Die Gewichte, die Grenzen für „Kaufen“ und „Verkaufen“ und die Mindestanzahl an Quellen stehen
-unter **Einstellungen**. Finnhub und Alpha Vantage werden nur für US-Aktien abgefragt, weil ihre kostenlosen Tarife nichts anderes liefern.
+unter **Einstellungen**. Finnhub und Nasdaq werden nur für US-Aktien abgefragt, weil ihre kostenlosen Tarife nichts anderes liefern.
 
 ## Zeitplan
 

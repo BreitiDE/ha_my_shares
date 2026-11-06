@@ -1,5 +1,5 @@
 name: My Shares
-version: "1.2.0"
+version: "1.2.1"
 slug: my_shares
 description: Depot und Beobachtungsliste mit Empfehlungsindex 0–10 aus mehreren Quellen
 url: https://github.com/BreitiDE/ha_my_shares

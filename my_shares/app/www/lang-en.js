@@ -247,6 +247,14 @@ window.LANG_EN = {
   "Unbekannte Währung": "Unknown currency",
   "1 Aktie": "1 share",
 
+  // 1.2.1: Nasdaq
+  "Finnhub liefert erst mit einem kostenlosen API-Key Daten (nur für US-Aktien).": "Finnhub only delivers data with a free API key (US shares only).",
+  "Nasdaq – Analysten": "Nasdaq – analysts",
+  "Kaufen, halten, verkaufen und Kursziel · nur US-Aktien": "Buy, hold, sell and price target · US shares only",
+  "Gewicht Nasdaq": "Weight Nasdaq",
+  "Finnhub und Nasdaq werden nur für US-Aktien abgefragt, weil sie für andere Aktien keine Daten liefern.": "Finnhub and Nasdaq are only queried for US shares because they deliver no data for other shares.",
+  "{b} kaufen · {h} halten · {s} verkaufen": "{b} buy · {h} hold · {s} sell",
+
   // 1.2.0: Alpha Vantage, MarketScreener
   "Finnhub und Alpha Vantage liefern erst mit einem kostenlosen API-Key Daten (nur für US-Aktien).": "Finnhub and Alpha Vantage only deliver data with a free API key (US shares only).",
   "Stark kaufen bis stark verkaufen, monatlich · nur US-Aktien": "Strong buy to strong sell, monthly · US shares only",

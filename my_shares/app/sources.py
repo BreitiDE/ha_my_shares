@@ -7,7 +7,6 @@ einfache HTTP-Clients mit HTTP 429 abweist.
 import asyncio
 import logging
 import re
-from datetime import datetime, timedelta
 from urllib.parse import quote
 
 from curl_cffi.requests import AsyncSession
@@ -15,8 +14,8 @@ from curl_cffi.requests import AsyncSession
 log = logging.getLogger("my_shares.sources")
 
 TIMEOUT = 20
-SOURCE_KEYS = ("yahoo", "finnhub", "alphavantage", "marketscreener", "target", "technical")
-US_ONLY = ("finnhub", "alphavantage")      # kostenlose Tarife decken nur US-Aktien ab
+SOURCE_KEYS = ("yahoo", "finnhub", "nasdaq", "marketscreener", "target", "technical")
+US_ONLY = ("finnhub", "nasdaq")            # liefern nur für US-Aktien Daten
 
 # Bloomberg-Börsencodes (OpenFIGI) -> Yahoo-Endung und Anzeigename
 EXCHANGES = {
@@ -336,32 +335,30 @@ class Fetcher:
             raise SourceError("nodata")
         return data[0]
 
-    # ---------- Alpha Vantage (nur US) ----------
-    async def alphavantage(self, symbol, key):
-        data = await self._json("GET", "https://www.alphavantage.co/query",
-                                params={"function": "OVERVIEW", "symbol": symbol, "apikey": key})
+    # ---------- Nasdaq (nur US, ohne Key) ----------
+    async def nasdaq(self, symbol):
+        sym = symbol.replace("-", ".")            # Yahoo BRK-B -> Nasdaq BRK.B
+        data = await self._json("GET", f"https://api.nasdaq.com/api/analyst/{sym}/targetprice",
+                                headers={"Accept": "application/json, text/plain, */*",
+                                         "Origin": "https://www.nasdaq.com", "Referer": "https://www.nasdaq.com/"})
         if not isinstance(data, dict):
             raise SourceError("error", "unerwartete Antwort")
-        msg = data.get("Information") or data.get("Note") or data.get("Error Message")
-        if msg:
-            low = msg.lower()
-            if "rate limit" in low or "per day" in low or "frequency" in low:
-                raise SourceError("limit", "Tageslimit von Alpha Vantage erreicht")
-            if "apikey" in low or "api key" in low:
-                raise SourceError("noaccess", "API-Key ungültig")
-            raise SourceError("error", msg[:80])
-        if not data.get("Symbol"):
+        co = ((data.get("data") or {}).get("consensusOverview")) or {}
+        if not co:
             raise SourceError("nodata")
 
-        def num(k):
-            v = data.get(k)
+        def num(v):
+            if v in (None, "", "N/A", "--"):
+                return None
             try:
-                return float(v) if v not in (None, "", "None", "-") else None
+                return float(str(v).replace("$", "").replace(",", ""))
             except ValueError:
                 return None
-        keys = ("AnalystRatingStrongBuy", "AnalystRatingBuy", "AnalystRatingHold", "AnalystRatingSell", "AnalystRatingStrongSell")
-        counts = dict(zip(("strongBuy", "buy", "hold", "sell", "strongSell"), (int(num(k) or 0) for k in keys)))
-        return {**counts, "target": num("AnalystTargetPrice")}
+        out = {"buy": int(num(co.get("buy")) or 0), "hold": int(num(co.get("hold")) or 0),
+               "sell": int(num(co.get("sell")) or 0), "target": num(co.get("priceTarget"))}
+        if not (out["buy"] + out["hold"] + out["sell"]):
+            raise SourceError("nodata")
+        return out
 
     # ---------- MarketScreener ----------
     async def _ms_get(self, url):
@@ -394,49 +391,6 @@ class Fetcher:
     async def ms_consensus(self, base_url):
         r = await self._ms_get(base_url + "consensus/")
         return parse_ms_consensus(r.text)
-
-class AVGate:
-    """Alpha Vantage, kostenloser Tarif: 25 Abrufe pro Tag, 5 pro Minute.
-    Ergebnisse werden 20 h zwischengespeichert, damit „Neu berechnen“ keine Abrufe verbraucht."""
-
-    DAILY = 25
-    GAP = 13.0          # Sekunden zwischen zwei Abrufen
-
-    def __init__(self, db):
-        self.db = db
-        self.last = None
-
-    async def get(self, f, symbol, key):
-        now = datetime.now()
-        cache = {k: v for k, v in (self.db.meta("av_cache") or {}).items()
-                 if now - datetime.fromisoformat(v["ts"]) < timedelta(days=3)}
-        hit = cache.get(symbol)
-        if hit and now - datetime.fromisoformat(hit["ts"]) < timedelta(hours=20):
-            return hit["data"]
-        today = now.date().isoformat()
-        use = self.db.meta("av_usage") or {}
-        if use.get("date") != today:
-            use = {"date": today, "count": 0}
-        if use["count"] >= self.DAILY:
-            raise SourceError("limit", "Tageslimit von Alpha Vantage erreicht")
-        if self.last:
-            wait = self.GAP - (datetime.now() - self.last).total_seconds()
-            if wait > 0:
-                await asyncio.sleep(wait)
-        self.last = datetime.now()
-        use["count"] += 1
-        self.db.set_meta("av_usage", use)
-        try:
-            data = await f.alphavantage(symbol, key)
-        except SourceError as e:
-            if e.status == "limit":
-                use["count"] = self.DAILY
-                self.db.set_meta("av_usage", use)
-            raise
-        cache[symbol] = {"ts": now.replace(microsecond=0).isoformat(), "data": data}
-        self.db.set_meta("av_cache", cache)
-        return data
-
 
 async def ms_resolve(f, share, name, price, currency, fx):
     """Sucht die MarketScreener-Seite einer Aktie und prüft sie am Kurs (oder am Namen)."""
@@ -483,7 +437,7 @@ async def ms_resolve(f, share, name, price, currency, fx):
 async def evaluate(f, share, settings, ctx=None):
     """Holt alle Quellen für eine Aktie und berechnet den Index.
 
-    ctx: {"fx": Wechselkurse, "av": AVGate}. Ohne Kurs (Yahoo-Chart) wird SourceError geworfen.
+    ctx: {"fx": Wechselkurse}. Ohne Kurs (Yahoo-Chart) wird SourceError geworfen.
     """
     ctx = ctx or {}
     sym = share["symbol"]
@@ -516,30 +470,32 @@ async def evaluate(f, share, settings, ctx=None):
         except SourceError as e:
             src["yahoo"] = {"status": e.status, "msg": e.msg}
 
-    # 2 Finnhub, 3 Alpha Vantage – nur US-Aktien
-    for k, key in (("finnhub", settings.get("finnhub_key")), ("alphavantage", settings.get("av_key"))):
+    # 2 Finnhub (Key), 3 Nasdaq (ohne Key) – nur US-Aktien
+    for k in ("finnhub", "nasdaq"):
         if off(k):
             src[k] = {"status": "off"}
             continue
         if not us:
             src[k] = {"status": "usonly"}
             continue
-        if not key:
+        if k == "finnhub" and not settings.get("finnhub_key"):
             src[k] = {"status": "nokey"}
             continue
         try:
             if k == "finnhub":
-                d = await f.finnhub(sym, key)
-            elif ctx.get("av"):
-                d = await ctx["av"].get(f, sym, key)
+                d = await f.finnhub(sym, settings["finnhub_key"])
+                sc, n = counts_score(d)
+                counts = [int(d.get(x) or 0) for x in ("strongBuy", "buy", "hold", "sell", "strongSell")]
             else:
-                d = await f.alphavantage(sym, key)
-            sc, n = counts_score(d)
+                d = await f.nasdaq(sym)
+                n = d["buy"] + d["hold"] + d["sell"]
+                # Nasdaq fasst „stark kaufen“ und „kaufen“ zusammen -> Mitte der beiden Stufen
+                sc = round((8.75 * d["buy"] + 5 * d["hold"] + 1.25 * d["sell"]) / n, 2)
+                counts = [d["buy"], d["hold"], d["sell"]]
             if sc is None:
                 src[k] = {"status": "nodata"}
             else:
-                src[k] = {"status": "ok", "score": sc, "n": n, "period": d.get("period"),
-                          "counts": [int(d.get(x) or 0) for x in ("strongBuy", "buy", "hold", "sell", "strongSell")]}
+                src[k] = {"status": "ok", "score": sc, "n": n, "period": d.get("period"), "counts": counts}
             if d.get("target") and 0.2 < d["target"] / price < 5:
                 pots.append(d["target"] / price - 1)
         except SourceError as e:
@@ -599,7 +555,7 @@ async def evaluate(f, share, settings, ctx=None):
             den += wk
             used += 1
     score = round(num / den, 1) if den and used >= int(settings.get("min_sources") or 1) else None
-    analysts = max([s.get("n") or 0 for k, s in src.items() if k in ("yahoo", "finnhub", "alphavantage", "marketscreener")] + [0])
+    analysts = max([s.get("n") or 0 for k, s in src.items() if k in ("yahoo", "finnhub", "nasdaq", "marketscreener")] + [0])
 
     return {"price": price, "currency": chart["currency"], "change_pct": chart["change_pct"],
             "name": name, "exchange": share.get("exchange") or chart["exchange"],

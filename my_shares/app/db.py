@@ -10,8 +10,7 @@ DEFAULTS = {
     "schedule_time": "07:30",
     "schedule_days": [0, 1, 2, 3, 4],          # Mo–Fr
     "finnhub_key": "",
-    "av_key": "",
-    "weights": {"yahoo": 1.0, "finnhub": 1.0, "alphavantage": 1.0, "marketscreener": 1.0, "target": 1.0, "technical": 1.0},
+    "weights": {"yahoo": 1.0, "finnhub": 1.0, "nasdaq": 1.0, "marketscreener": 1.0, "target": 1.0, "technical": 1.0},
     "min_sources": 2,
     "buy_threshold": 6.5,
     "sell_threshold": 3.5,
@@ -86,7 +85,7 @@ class DB:
                 except ValueError:
                     pass
         stored = s.get("weights") or {}
-        s["weights"] = {k: stored.get(k, v) for k, v in DEFAULTS["weights"].items()}   # alte Quellen (fmp) fallen weg
+        s["weights"] = {k: stored.get(k, v) for k, v in DEFAULTS["weights"].items()}   # alte Quellen (fmp, alphavantage) fallen weg
         return s
 
     def save_settings(self, values):

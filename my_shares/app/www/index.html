@@ -267,6 +267,16 @@ tbody tr[data-id] { cursor: pointer; }
 .keyrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .keyrow input { flex: 1 1 200px; width: auto; }
 td input[type=number] { width: 80px; }
+.app-nav .count.err { background: var(--crit-bg); color: var(--crit-text); }
+.toolbar { display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: center; margin-bottom: 12px; }
+.toolbar select { width: auto; font-size: 13px; padding: 5px 8px; max-width: 220px; }
+.toolbar .switch { margin-left: auto; font-weight: 400; font-size: 13px; }
+#logTable { min-width: 900px; }
+#logTable tr.run td { background: var(--track); color: var(--ink-2); font-size: 12px; padding: 6px 8px; }
+#logTable tr.run td b { color: var(--ink); }
+#logTable td.msg { overflow-wrap: anywhere; }
+#logTable td.msg .sub { font-family: var(--mono); font-size: 11.5px; }
+#logTable mark { background: var(--accent-soft); color: inherit; border-radius: 3px; padding: 0 2px; }
 #view-list .table-wrap > table { min-width: 1080px; }
 #view-list td:first-child { min-width: 190px; }
 </style>
@@ -283,6 +293,7 @@ td input[type=number] { width: 80px; }
       <button data-view="depot">Depot <span class="count" id="navCountDepot">0</span></button>
       <button data-view="watch">Beobachten <span class="count" id="navCountWatch">0</span></button>
       <button data-view="settings">Einstellungen</button>
+      <button data-view="log">Log <span class="count err" id="navCountLog" hidden>0</span></button>
     </nav>
     <div class="who">
       <span id="status"><span class="dot"></span> <span>lädt …</span></span>
@@ -418,6 +429,43 @@ td input[type=number] { width: 80px; }
     </div>
   </section>
 
+  <!-- ======================= Ansicht: Log ======================= -->
+  <section id="view-log" class="stack" style="gap:16px" aria-label="Log" hidden>
+    <div class="page-head">
+      <h1>Log</h1>
+      <div class="facts" id="logFacts"></div>
+      <div class="right">
+        <a class="btn" id="logDownload" href="api/logs/download" download><svg class="i" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span>Herunterladen</span></a>
+        <button class="btn danger" id="logClear"><svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg><span>Log leeren …</span></button>
+      </div>
+    </div>
+    <section class="card" aria-label="Log-Einträge">
+      <div class="toolbar">
+        <label class="search"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <input type="search" id="logQ" placeholder="Suchen in Meldung, Aktie, Adresse …" aria-label="Suchen"></label>
+        <div class="seg" role="group" aria-label="Stufe" id="logLevel">
+          <button data-l="" aria-pressed="true">Alle</button><button data-l="info" aria-pressed="false">Info</button><button data-l="warn" aria-pressed="false">Warnungen</button><button data-l="err" aria-pressed="false">Fehler</button>
+        </div>
+        <select id="logSource" aria-label="Quelle"><option value="">Alle Quellen</option></select>
+        <select id="logShare" aria-label="Aktie"><option value="">Alle Aktien</option></select>
+        <label class="switch"><input type="checkbox" id="logLive" checked><span class="track"></span><span>Live</span></label>
+      </div>
+      <div class="table-wrap">
+        <table id="logTable">
+          <thead><tr><th>Zeit ↓</th><th>Stufe</th><th>Quelle</th><th>Aktie</th><th>Meldung</th><th class="num">Dauer</th></tr></thead>
+          <tbody id="logRows"><tr><td colspan="6" class="empty">lädt …</td></tr></tbody>
+        </table>
+      </div>
+      <div class="pager"><span id="logRange"></span>
+        <span class="right">pro Seite <select id="logSize" style="width:auto;padding:5px 8px;font-size:13px"><option>50</option><option selected>100</option><option>250</option></select>
+          <button class="icon-btn" id="logPrev" aria-label="Vorherige Seite" title="Vorherige Seite"><svg class="i" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+          <span style="padding:0 6px" id="logPage"></span>
+          <button class="icon-btn" id="logNext" aria-label="Nächste Seite" title="Nächste Seite"><svg class="i" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button></span>
+      </div>
+    </section>
+    <p class="hint" style="margin:0">Einträge älter als 30 Tage werden automatisch gelöscht. API-Keys erscheinen nie im Log.</p>
+  </section>
+
   <footer class="app-footer"><span id="footVersion">My Shares</span><a href="https://github.com/BreitiDE/ha_my_shares" target="_blank" rel="noopener">GitHub</a><span id="footStand"></span></footer>
 </main>
 
@@ -476,6 +524,18 @@ td input[type=number] { width: 80px; }
       <p class="field-err" id="moveErr" hidden></p>
     </div>
     <div class="dlg-foot"><button class="btn" type="button" data-close>Abbrechen</button><button class="btn primary" type="submit" id="moveOk">Ins Depot verschieben</button></div>
+  </form>
+</dialog>
+
+<!-- ======================= Dialog: Log leeren ======================= -->
+<dialog id="clearDlg" class="small" aria-labelledby="clearTitle">
+  <form class="dlg" id="clearForm">
+    <div class="dlg-head"><h2 id="clearTitle">Log leeren?</h2></div>
+    <div class="dlg-body">
+      <label class="f">Was soll gelöscht werden?<select id="clearMode"></select></label>
+      <p class="hint" style="margin:0">Gelöschte Einträge lassen sich nicht wiederherstellen.</p>
+    </div>
+    <div class="dlg-foot"><button class="btn" type="button" data-close>Abbrechen</button><button class="btn danger-fill" type="submit">Löschen</button></div>
   </form>
 </dialog>
 
@@ -630,11 +690,13 @@ const px = (sh, k) => sh.disp && sh.disp[k] != null ? m(sh.disp[k]) : money(sh[k
 
 // ---------- Ansichten ----------
 function show(view) {
-  VIEW = ["depot", "watch", "settings"].includes(view) ? view : "depot"; store("ms-view", VIEW);
-  $("view-list").hidden = VIEW === "settings"; $("view-settings").hidden = VIEW !== "settings";
+  VIEW = ["depot", "watch", "settings", "log"].includes(view) ? view : "depot"; store("ms-view", VIEW);
+  $("view-list").hidden = VIEW === "settings" || VIEW === "log"; $("view-settings").hidden = VIEW !== "settings";
+  $("view-log").hidden = VIEW !== "log";
   document.querySelectorAll(".app-nav [data-view]").forEach(b => b.dataset.view === VIEW ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current"));
   $("listTitle").textContent = t(VIEW === "watch" ? "Beobachten" : "Depot");
   if (VIEW === "settings" && ST) fillSettings();
+  else if (VIEW === "log") loadLogs();
   else if (ST) render();
 }
 document.querySelectorAll("[data-view]").forEach(b => b.onclick = () => show(b.dataset.view));
@@ -648,6 +710,7 @@ async function refresh() {
     ST = await api("state");
     failed = false;
     render();
+    if (VIEW === "log" && $("logLive").checked) loadLogs(true);
   } catch (e) {
     failed = true;
     renderStatus();
@@ -688,6 +751,8 @@ function render() {
   const set = ST.settings, lst = LIST(), s = ST.stats[lst];
   $("navCountDepot").textContent = ST.stats.depot.count;
   $("navCountWatch").textContent = ST.stats.watch.count;
+  $("navCountLog").textContent = ST.log_err24; $("navCountLog").hidden = !ST.log_err24;
+  $("navCountLog").title = t("{n} Fehler in den letzten 24 Stunden", { n: ST.log_err24 });
   if (ST.user) { $("user").hidden = false; $("user").innerHTML = `${esc(t("angemeldet als"))} <b>${esc(ST.user)}</b>`; }
   $("footVersion").textContent = "My Shares " + ST.version;
   $("footStand").textContent = t("Aktualisiert sich alle 30 s · Stand {t}", { t: new Date().toLocaleTimeString(LOC) })
@@ -695,6 +760,7 @@ function render() {
   $("runAll").disabled = ST.running || ST.queued || !(ST.stats.depot.count + ST.stats.watch.count);
   $("runAll").querySelector("span").textContent = ST.running ? t("berechnet …") : t("Neu berechnen");
   if (VIEW === "settings") { if (!settingsDirty) fillSettings(); return; }
+  if (VIEW === "log") return;
 
   // Hinweis auf fehlende Keys
   let hidden = false; try { hidden = localStorage.getItem("ms-hide-keys") === "1"; } catch {}
@@ -1146,6 +1212,103 @@ $("saveRate").onclick = () => saveSettings({ buy_threshold: $("buyTh").value, se
 $("saveLang").onclick = async () => {
   const langChanged = $("lang").value !== ST.settings.language;
   if (await saveSettings({ language: $("lang").value, currency: $("currency").value }, $("saveLang"), null) && langChanged) location.reload();
+};
+
+// ---------- Log ----------
+const LOGQ = { q: "", level: "", source: "", share: "", page: 1, size: 100 };
+try { LOGQ.size = +localStorage.getItem("ms-log-size") || 100; $("logSize").value = LOGQ.size; } catch {}
+const LVL = { ok: ["OK", "ok"], info: ["Info", ""], warn: ["Warnung", "warn"], err: ["Fehler", "bad"] };
+let logSeq = 0, logT;
+function logQuery(withPage = true) {
+  const p = new URLSearchParams();
+  for (const k of ["q", "level", "source", "share"]) if (LOGQ[k]) p.set(k, LOGQ[k]);
+  if (withPage) { p.set("page", LOGQ.page); p.set("size", LOGQ.size); }
+  return p.toString();
+}
+function logTime(iso) {
+  const d = new Date(iso);
+  return sameDay(d, new Date()) ? `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}` : dt(iso);
+}
+function hl(text) {
+  const e = esc(text);
+  if (!LOGQ.q) return e;
+  const q = esc(LOGQ.q).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return e.replace(new RegExp(q, "gi"), m => `<mark>${m}</mark>`);
+}
+function fillSelect(sel, values, all) {
+  const cur = sel.value;
+  sel.innerHTML = `<option value="">${esc(t(all))}</option>` + values.map(v => `<option${v === cur ? " selected" : ""}>${esc(v)}</option>`).join("");
+  if (cur && !values.includes(cur)) { sel.insertAdjacentHTML("beforeend", `<option selected>${esc(cur)}</option>`); }
+}
+async function loadLogs(quiet) {
+  const seq = ++logSeq;
+  if (!quiet) $("logRows").innerHTML = `<tr><td colspan="6" class="empty">${esc(t("lädt …"))}</td></tr>`;
+  let r;
+  try { r = await api("logs?" + logQuery()); } catch (e) { $("logRows").innerHTML = `<tr><td colspan="6" class="empty">${esc(e.message)}</td></tr>`; return; }
+  if (seq !== logSeq) return;                         // ältere Antwort verwerfen
+  const fc = r.facets;
+  $("logFacts").innerHTML = [
+    `<span><b>${esc(nf(fc.total, 0))}</b> ${esc(t("Einträge"))}</span>`,
+    `<span><b>${fc.err24}</b> ${esc(t("Fehler"))} · <b>${fc.warn24}</b> ${esc(t(fc.warn24 === 1 ? "Warnung in 24 h" : "Warnungen in 24 h"))}</span>`,
+    fc.oldest ? `<span>${esc(t("ältester Eintrag"))} <b>${esc(dt(fc.oldest).slice(0, -6))}</b></span>` : "",
+  ].join("");
+  fillSelect($("logSource"), fc.sources, "Alle Quellen");
+  fillSelect($("logShare"), fc.shares, "Alle Aktien");
+  $("logClear").dataset.facets = JSON.stringify(fc);
+  $("logDownload").href = "api/logs/download" + (logQuery(false) ? "?" + logQuery(false) : "");
+  const pages = Math.max(1, Math.ceil(r.total / LOGQ.size));
+  if (LOGQ.page > pages) { LOGQ.page = pages; return loadLogs(quiet); }
+  const from = r.total ? (LOGQ.page - 1) * LOGQ.size + 1 : 0, to = Math.min(r.total, LOGQ.page * LOGQ.size);
+  $("logRange").textContent = t("{a}–{b} von {n}", { a: nf(from, 0), b: nf(to, 0), n: nf(r.total, 0) });
+  $("logPage").textContent = t("Seite {p} von {n}", { p: LOGQ.page, n: pages });
+  $("logPrev").disabled = LOGQ.page <= 1; $("logNext").disabled = LOGQ.page >= pages;
+  if (!r.items.length) {
+    const filtered = LOGQ.q || LOGQ.level || LOGQ.source || LOGQ.share;
+    $("logRows").innerHTML = `<tr><td colspan="6" class="empty">${esc(t(filtered ? "Keine Einträge passen zum Filter." : "Das Log ist leer."))}</td></tr>`;
+    return;
+  }
+  $("logRows").innerHTML = r.items.map(x => {
+    if (x.level === "run") {
+      const [head, ...rest] = x.msg.split(" · ");
+      return `<tr class="run"><td colspan="6"><b>${hl(head)}</b> · ${esc(dt(x.ts))}${rest.length ? " · " + hl(rest.join(" · ")) : ""}</td></tr>`;
+    }
+    const [txt, cls] = LVL[x.level] || LVL.info;
+    return `<tr><td class="nw num">${esc(logTime(x.ts))}</td><td class="mid"><span class="pill ${cls}">${esc(t(txt))}</span></td>
+      <td class="mid">${x.source ? `<span class="badge">${hl(x.source)}</span>` : ""}</td><td class="nw">${x.share ? hl(x.share) : '<span class="dimmed">–</span>'}</td>
+      <td class="msg">${hl(x.msg)}${x.detail ? `<div class="sub">${hl(x.detail)}</div>` : ""}</td>
+      <td class="num">${x.dur != null ? esc(nf(x.dur, 0)) + " ms" : ""}</td></tr>`;
+  }).join("");
+}
+$("logQ").addEventListener("input", () => { clearTimeout(logT); logT = setTimeout(() => { LOGQ.q = $("logQ").value.trim(); LOGQ.page = 1; loadLogs(); }, 300); });
+$("logLevel").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  LOGQ.level = b.dataset.l; LOGQ.page = 1;
+  $("logLevel").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b));
+  loadLogs();
+});
+$("logSource").onchange = () => { LOGQ.source = $("logSource").value; LOGQ.page = 1; loadLogs(); };
+$("logShare").onchange = () => { LOGQ.share = $("logShare").value; LOGQ.page = 1; loadLogs(); };
+$("logSize").onchange = () => { LOGQ.size = +$("logSize").value; LOGQ.page = 1; store("ms-log-size", String(LOGQ.size)); loadLogs(); };
+$("logPrev").onclick = () => { LOGQ.page--; loadLogs(); };
+$("logNext").onclick = () => { LOGQ.page++; loadLogs(); };
+$("logLive").onchange = () => { if ($("logLive").checked) loadLogs(true); };
+$("logClear").onclick = () => {
+  let fc = {}; try { fc = JSON.parse($("logClear").dataset.facets || "{}"); } catch {}
+  $("clearMode").innerHTML = [
+    ["all", t("Alle {n} Einträge", { n: nf(fc.total || 0, 0) })],
+    ["older7", t("Einträge älter als 7 Tage ({n})", { n: nf(fc.older7 || 0, 0) })],
+    ["info", t("Nur Info-Einträge ({n})", { n: nf(fc.info || 0, 0) })],
+  ].map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join("");
+  $("clearDlg").showModal(); $("clearMode").focus();
+};
+$("clearForm").onsubmit = async e => {
+  e.preventDefault();
+  try {
+    const r = await api("logs/clear", { method: "POST", body: { mode: $("clearMode").value } });
+    $("clearDlg").close();
+    toast(t(r.deleted === 1 ? "1 Eintrag gelöscht" : "{n} Einträge gelöscht", { n: nf(r.deleted, 0) }));
+    LOGQ.page = 1; loadLogs(); refresh();
+  } catch (err) { toast(err.message, true); }
 };
 
 // ---------- Start ----------

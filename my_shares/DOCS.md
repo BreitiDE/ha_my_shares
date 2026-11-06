@@ -52,6 +52,14 @@ Unter **Einstellungen → Zeitplan** stellst Du Uhrzeit und Wochentage ein (Stan
 „Neu berechnen“ startet einen Lauf sofort. Zwischen zwei Aktien wartet die App 1,5 s, um die Anbieter
 nicht zu überlasten.
 
+## Log
+
+Unter **Log** steht, was die App im Hintergrund getan hat: jeder Abruf einer Quelle mit Aktie, Ergebnis,
+Adresse, HTTP-Status und Dauer, Beginn und Ende jedes Laufs sowie Deine eigenen Aktionen. Du kannst suchen,
+nach Stufe, Quelle und Aktie filtern, das Log als Textdatei herunterladen und es leeren (alles, älter als
+7 Tage oder nur Info-Einträge). Einträge älter als 30 Tage löscht die App selbst. API-Keys stehen nie im Log.
+Die Meldungen im Log sind immer deutsch, auch wenn die Oberfläche auf Englisch steht.
+
 ## Daten
 
 Alles liegt in `/data/my_shares.db` und bleibt bei Updates erhalten.

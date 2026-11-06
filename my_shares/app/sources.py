@@ -7,6 +7,7 @@ einfache HTTP-Clients mit HTTP 429 abweist.
 import asyncio
 import logging
 import re
+import time
 from urllib.parse import quote
 
 from curl_cffi.requests import AsyncSession
@@ -98,6 +99,19 @@ def parse_ms_consensus(html):
     return out
 
 
+SECRET_PARAMS = {"token", "apikey", "api_key", "crumb", "key"}
+
+
+def show_url(url, params=None):
+    """Adresse fürs Log: ohne https://www., ohne Keys."""
+    from urllib.parse import parse_qsl, urlencode, urlsplit
+    parts = urlsplit(url)
+    q = [(k, v) for k, v in parse_qsl(parts.query) if k.lower() not in SECRET_PARAMS]
+    q += [(k, v) for k, v in (params or {}).items() if k.lower() not in SECRET_PARAMS]
+    host = parts.netloc[4:] if parts.netloc.startswith("www.") else parts.netloc
+    return host + parts.path + ("?" + urlencode(q, safe=",") if q else "")
+
+
 def clamp(x):
     return max(0.0, min(10.0, x))
 
@@ -170,6 +184,26 @@ class Fetcher:
     def __init__(self):
         self.s = AsyncSession(impersonate="chrome", timeout=TIMEOUT)
         self.crumb = None
+        self.calls = []          # Mitschnitt der Abrufe fürs Log: (Text, Millisekunden)
+
+    async def _req(self, method, url, **kw):
+        """HTTP-Abruf mit Mitschnitt. API-Keys und Crumb tauchen im Mitschnitt nie auf."""
+        shown = show_url(url, kw.get("params"))
+        t0 = time.monotonic()
+        try:
+            r = await self.s.request(method, url, **kw)
+        except Exception as e:
+            self.calls.append((f"{method} {shown} → {type(e).__name__}", int((time.monotonic() - t0) * 1000)))
+            raise
+        self.calls.append((f"{method} {shown} → {r.status_code}", int((time.monotonic() - t0) * 1000)))
+        return r
+
+    def take_calls(self):
+        """Gibt die Abrufe seit dem letzten Aufruf zurück: (Detailtext, Gesamtdauer ms)."""
+        calls, self.calls = self.calls, []
+        if not calls:
+            return None, None
+        return " · ".join(c for c, _ in calls), sum(ms for _, ms in calls)
 
     async def close(self):
         try:
@@ -179,7 +213,7 @@ class Fetcher:
 
     async def _json(self, method, url, **kw):
         try:
-            r = await self.s.request(method, url, **kw)
+            r = await self._req(method, url, **kw)
         except Exception as e:  # noqa: BLE001
             raise SourceError("error", f"nicht erreichbar ({type(e).__name__})") from e
         if r.status_code in (401, 402, 403):
@@ -199,7 +233,7 @@ class Fetcher:
     async def ecb(self):
         from fx import ECB_URL, parse_ecb
         try:
-            r = await self.s.get(ECB_URL)
+            r = await self._req("GET", ECB_URL)
         except Exception as e:  # noqa: BLE001
             raise SourceError("error", f"EZB nicht erreichbar ({type(e).__name__})") from e
         if r.status_code != 200:
@@ -292,11 +326,11 @@ class Fetcher:
             return self.crumb
         for warm in ("https://fc.yahoo.com", "https://finance.yahoo.com/"):
             try:
-                await self.s.get(warm, allow_redirects=True)
+                await self._req("GET", warm, allow_redirects=True)
             except Exception:  # noqa: BLE001
                 pass
             try:
-                r = await self.s.get("https://query1.finance.yahoo.com/v1/test/getcrumb")
+                r = await self._req("GET", "https://query1.finance.yahoo.com/v1/test/getcrumb")
                 t = (r.text or "").strip()
                 if r.status_code == 200 and t and "<" not in t and len(t) < 40:
                     self.crumb = t
@@ -363,7 +397,7 @@ class Fetcher:
     # ---------- MarketScreener ----------
     async def _ms_get(self, url):
         try:
-            r = await self.s.get(url, headers={"Accept-Language": "en-US,en;q=0.9"}, allow_redirects=True)
+            r = await self._req("GET", url, headers={"Accept-Language": "en-US,en;q=0.9"}, allow_redirects=True)
         except Exception as e:  # noqa: BLE001
             raise SourceError("error", f"nicht erreichbar ({type(e).__name__})") from e
         if r.status_code in (403, 429, 503):
@@ -434,12 +468,66 @@ async def ms_resolve(f, share, name, price, currency, fx):
     raise SourceError("nodata", "Aktie auf MarketScreener nicht gefunden")
 
 
+LOG_NAMES = {"yahoo": "Yahoo", "finnhub": "Finnhub", "nasdaq": "Nasdaq", "marketscreener": "MarketScreener"}
+STATUS_LEVEL = {"ok": "ok", "nodata": "info", "usonly": "info", "nokey": "info", "noaccess": "warn",
+                "limit": "err", "error": "err"}
+
+
+def de(v, d=2):
+    """Zahl im deutschen Format für Log-Meldungen."""
+    if v is None:
+        return "–"
+    return f"{v:,.{d}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def src_message(k, s, cur):
+    st = s.get("status")
+    if st == "usonly":
+        return "Übersprungen: nur für US-Aktien"
+    if st == "nokey":
+        return "Übersprungen: kein API-Key"
+    if st == "nodata":
+        return "Keine Daten" + (f" ({s['msg']})" if s.get("msg") else "")
+    if st == "noaccess":
+        if k in ("nasdaq", "marketscreener", "yahoo"):
+            return f"Abruf blockiert ({s.get('msg') or 'abgelehnt'}) – Index ohne diese Quelle berechnet"
+        return f"Kein Zugriff ({s.get('msg') or 'abgelehnt'})"
+    if st in ("error", "limit"):
+        return f"Fehler: {s.get('msg') or 'unbekannt'}"
+    tgt = f" · Kursziel {de(s['target'])} {cur}" if s.get("target") else ""
+    if k == "yahoo":
+        return f"Analystenkonsens {de(s['mean'])} · {s['n']} Analysten{tgt}"
+    if k == "finnhub":
+        return f"Empfehlungen {s.get('period') or ''}: " + " · ".join(str(c) for c in s.get("counts") or [])
+    if k == "nasdaq":
+        b, h, se = s.get("counts") or [0, 0, 0]
+        return f"{b} kaufen · {h} halten · {se} verkaufen{tgt}"
+    if k == "marketscreener":
+        return f"Konsens „{s['label']}“ · {s['n']} Analysten" + (f" · Potenzial {de(s['pot'] * 100, 1)} %" if s.get("pot") is not None else "")
+    return ""
+
+
 async def evaluate(f, share, settings, ctx=None):
     """Holt alle Quellen für eine Aktie und berechnet den Index.
 
-    ctx: {"fx": Wechselkurse}. Ohne Kurs (Yahoo-Chart) wird SourceError geworfen.
+    ctx: {"fx": Wechselkurse, "log": log(level, quelle, meldung, detail, dauer)}.
+    Ohne Kurs (Yahoo-Chart) wird SourceError geworfen.
     """
     ctx = ctx or {}
+    log = ctx.get("log") or (lambda *a, **k: None)
+
+    def log_src(k, extra="", warn=False):
+        detail, dur = f.take_calls()
+        s = src.get(k) or {}
+        if s.get("status") in (None, "off"):
+            return
+        level = STATUS_LEVEL.get(s["status"], "info")
+        if s["status"] == "noaccess" and k in ("nasdaq", "marketscreener", "yahoo"):
+            level = "err"                      # Quellen ohne Key: Ablehnung heißt blockiert
+        if warn and level == "ok":
+            level = "warn"
+        log(level, LOG_NAMES[k], src_message(k, s, chart["currency"]) + extra, detail, dur)
+
     sym = share["symbol"]
     w = settings["weights"]
     us = is_us(sym)
@@ -449,8 +537,16 @@ async def evaluate(f, share, settings, ctx=None):
     def off(k):
         return float(w.get(k) or 0) <= 0
 
-    chart = await f.yahoo_chart(sym)
+    f.take_calls()
+    try:
+        chart = await f.yahoo_chart(sym)
+    except SourceError as e:
+        detail, dur = f.take_calls()
+        log("err", "Yahoo", f"Kurs nicht abrufbar: {e.msg}", detail, dur)
+        raise
     price = chart["price"]
+    detail, dur = f.take_calls()
+    log("ok", "Yahoo", f"Kurs {de(price)} {chart['currency'] or ''} · {len(chart['closes'])} Tageskurse", detail, dur)
     name = chart["name"] or share.get("name") or sym
     pots = []          # Kursziel-Potenziale aller Quellen
 
@@ -464,23 +560,24 @@ async def evaluate(f, share, settings, ctx=None):
                 pots.append(ysum["target"] / price - 1)
             if ysum["mean"]:
                 src["yahoo"] = {"status": "ok", "score": round(clamp((5 - ysum["mean"]) / 4 * 10), 2),
-                                "mean": ysum["mean"], "n": ysum["n"]}
+                                "mean": ysum["mean"], "n": ysum["n"], "target": ysum.get("target")}
             else:
                 src["yahoo"] = {"status": "nodata"}
         except SourceError as e:
             src["yahoo"] = {"status": e.status, "msg": e.msg}
+    log_src("yahoo")
 
     # 2 Finnhub (Key), 3 Nasdaq (ohne Key) – nur US-Aktien
-    for k in ("finnhub", "nasdaq"):
+    async def analyst(k):
         if off(k):
             src[k] = {"status": "off"}
-            continue
+            return
         if not us:
             src[k] = {"status": "usonly"}
-            continue
+            return
         if k == "finnhub" and not settings.get("finnhub_key"):
             src[k] = {"status": "nokey"}
-            continue
+            return
         try:
             if k == "finnhub":
                 d = await f.finnhub(sym, settings["finnhub_key"])
@@ -495,16 +592,22 @@ async def evaluate(f, share, settings, ctx=None):
             if sc is None:
                 src[k] = {"status": "nodata"}
             else:
-                src[k] = {"status": "ok", "score": sc, "n": n, "period": d.get("period"), "counts": counts}
+                src[k] = {"status": "ok", "score": sc, "n": n, "period": d.get("period"), "counts": counts,
+                          "target": d.get("target")}
             if d.get("target") and 0.2 < d["target"] / price < 5:
                 pots.append(d["target"] / price - 1)
         except SourceError as e:
             src[k] = {"status": e.status, "msg": e.msg}
 
+    for k in ("finnhub", "nasdaq"):
+        await analyst(k)
+        log_src(k)
+
     # 4 MarketScreener – alle Aktien
     if off("marketscreener"):
         src["marketscreener"] = {"status": "off"}
     else:
+        ms_extra, ms_lost = "", False
         try:
             cons = None
             if ms_url:
@@ -513,9 +616,11 @@ async def evaluate(f, share, settings, ctx=None):
                 except SourceError as e:
                     if e.msg != "Seite nicht gefunden":
                         raise
-                    ms_url = None                       # Seite verschwunden: neu suchen
+                    ms_url, ms_lost = None, True        # Seite verschwunden: neu suchen
             if not ms_url:
                 ms_url, cons = await ms_resolve(f, share, name, price, chart["currency"], ctx.get("fx"))
+                ms_extra = (" · gespeicherte Seite nicht mehr da, neu gefunden: " if ms_lost else " · Seite gefunden: ") \
+                    + ms_url.rstrip("/").rsplit("/", 1)[-1]
             src["marketscreener"] = {"status": "ok", "score": round(clamp((5 - cons["mean"]) / 4 * 10), 2),
                                      "label": cons["label"], "n": cons["n"], "url": ms_url}
             if cons.get("pot") is not None and -0.8 < cons["pot"] < 4:
@@ -523,6 +628,7 @@ async def evaluate(f, share, settings, ctx=None):
                 src["marketscreener"]["pot"] = cons["pot"]
         except SourceError as e:
             src["marketscreener"] = {"status": e.status, "msg": e.msg, "url": ms_url}
+        log_src("marketscreener", ms_extra, warn=ms_lost)
 
     # 5 Kursziel-Potenzial (Mittel aller Quellen)
     target = None
@@ -555,6 +661,12 @@ async def evaluate(f, share, settings, ctx=None):
             den += wk
             used += 1
     score = round(num / den, 1) if den and used >= int(settings.get("min_sources") or 1) else None
+    prev = share.get("score")
+    if score is None:
+        log("warn", "Index", f"Zu wenig Daten: {used} von {len(SOURCE_KEYS)} Quellen (mindestens {settings.get('min_sources')})")
+    else:
+        log("ok", "Index", f"Index {de(score, 1)} aus {used} von {len(SOURCE_KEYS)} Quellen"
+            + (f" (vorher {de(prev, 1)})" if prev is not None else ""))
     analysts = max([s.get("n") or 0 for k, s in src.items() if k in ("yahoo", "finnhub", "nasdaq", "marketscreener")] + [0])
 
     return {"price": price, "currency": chart["currency"], "change_pct": chart["change_pct"],

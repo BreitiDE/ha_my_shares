@@ -11,7 +11,7 @@ from db import CURRENCIES, DB, DEFAULTS, LISTS, now_iso
 from fx import convert
 from sources import SOURCE_KEYS, Fetcher, SourceError, evaluate, ms_normalize
 
-VERSION = "1.2.1"
+VERSION = "1.3.0"
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 PORT = int(os.environ.get("PORT", "8099"))
 WWW = os.path.join(os.path.dirname(os.path.abspath(__file__)), "www")
@@ -52,8 +52,15 @@ class Engine:
             self.db.set_meta("fx", fx)
             self.fx_try = None
             log.info("EZB-Kurse vom %s geladen (1 EUR = %.4f USD)", fx["date"], fx["rates"]["USD"])
+            detail, dur = f.take_calls()
+            d = fx["date"].split("-")
+            usd = f"{fx['rates']['USD']:.4f}".replace(".", ",")
+            self.db.log("ok", "EZB", f"Wechselkurse vom {d[2]}.{d[1]}.{d[0]} geladen · 1 € = {usd} $",
+                        detail=detail, dur=dur)
         except SourceError as e:
             log.warning("Wechselkurse: %s", e.msg)
+            detail, dur = f.take_calls()
+            self.db.log("err", "EZB", f"Wechselkurse nicht geladen: {e.msg}", detail=detail, dur=dur)
         finally:
             await f.close()
 
@@ -88,10 +95,15 @@ class Engine:
             if self.next_run and datetime.now() >= self.next_run and not self.running:
                 log.info("Geplanter Lauf startet")
                 self.compute_next()
-                await self.run()
+                await self.run(reason="geplant")
             if self.queue and not self.running:
                 ids, self.queue = list(self.queue), set()
-                await self.run(ids)
+                await self.run(ids, reason="von Hand")
+            if datetime.now().hour == 3 and self.db.meta("log_pruned") != datetime.now().date().isoformat():
+                self.db.set_meta("log_pruned", datetime.now().date().isoformat())
+                n = self.db.prune_logs()
+                if n:
+                    self.db.log("info", "System", f"{n} Log-Einträge älter als 30 Tage gelöscht")
 
     def request(self, ids=None):
         if ids:
@@ -101,7 +113,7 @@ class Engine:
         self.wake.set()
 
     # ---------- Berechnung ----------
-    async def run(self, ids=None):
+    async def run(self, ids=None, reason="von Hand"):
         if None in (ids or []):
             ids = None
         shares = self.db.shares()
@@ -112,14 +124,26 @@ class Engine:
         self.running = True
         self.progress = {"done": 0, "total": len(shares), "current": ""}
         settings = self.db.settings()
+        t0 = datetime.now()
+        nd = sum(1 for x in shares if x.get("list") == "depot")
+        self.db.log("run", "System", f"Lauf gestartet · {reason} · {len(shares)} "
+                    + ("Aktie" if len(shares) == 1 else "Aktien")
+                    + (f" (Depot {nd}, Beobachten {len(shares) - nd})" if len(shares) > 1 else ""))
+        counts = {"warn": 0, "err": 0}
         await self.update_fx()
         f = Fetcher()
         errors = 0
         try:
             for i, sh in enumerate(shares):
-                self.progress["current"] = sh.get("name") or sh["symbol"]
+                name = sh.get("name") or sh["symbol"]
+                self.progress["current"] = name
+
+                def share_log(level, source, msg, detail=None, dur=None, _n=name):
+                    if level in counts:
+                        counts[level] += 1
+                    self.db.log(level, source, msg, share=_n, detail=detail, dur=dur)
                 try:
-                    r = await evaluate(f, sh, settings, {"fx": self.fx})
+                    r = await evaluate(f, sh, settings, {"fx": self.fx, "log": share_log})
                     prev = sh["score"] if sh["score"] is not None else sh["score_prev"]
                     self.db.update_share(sh["id"], **r, score_prev=prev, updated_at=now_iso(), error=None)
                     self.db.add_history(sh["id"], r["score"], r["price"])
@@ -130,6 +154,7 @@ class Engine:
                 except Exception as e:  # noqa: BLE001
                     errors += 1
                     log.exception("%s: unerwarteter Fehler", sh["symbol"])
+                    share_log("err", "System", f"Interner Fehler: {type(e).__name__}: {e}")
                     self.db.update_share(sh["id"], error=f"interner Fehler: {type(e).__name__}", updated_at=now_iso())
                 self.progress["done"] = i + 1
                 if i < len(shares) - 1:
@@ -140,6 +165,12 @@ class Engine:
             self.progress["current"] = ""
             self.db.set_meta("last_run", {"ts": now_iso(), "count": len(shares), "errors": errors, "all": not ids})
             log.info("Lauf fertig: %d Aktien, %d Fehler", len(shares), errors)
+            secs = int((datetime.now() - t0).total_seconds())
+            took = f"{secs // 60} min {secs % 60} s" if secs >= 60 else f"{secs} s"
+            self.db.log("run", "System", f"Lauf fertig · {len(shares)} " + ("Aktie" if len(shares) == 1 else "Aktien")
+                        + f" · {counts['err']} Fehler · {counts['warn']} " + ("Warnung" if counts["warn"] == 1 else "Warnungen")
+                        + f" · Dauer {took}")
+            self.db.prune_logs()
 
 
 # ---------- Hilfsfunktionen ----------
@@ -215,6 +246,21 @@ def stats(shares, s):
     return out
 
 
+def extra_fields_text(sh):
+    """Stückzahl/Kaufkurs/Wunschkurs einer Aktie als kurzer Text fürs Log."""
+    if not sh:
+        return ""
+    parts = []
+    if sh.get("quantity"):
+        q = sh["quantity"]
+        parts.append(f"{q:g} Stück".replace(".", ","))
+    if sh.get("buy_price"):
+        parts.append(f"Kaufkurs {sh['buy_price']:.2f} {sh.get('buy_currency') or ''}".replace(".", ",").strip())
+    if sh.get("wish_price"):
+        parts.append(f"Wunschkurs {sh['wish_price']:.2f} {sh.get('wish_currency') or ''}".replace(".", ",").strip())
+    return " · ".join(parts)
+
+
 def json_error(msg, status=400):
     return web.json_response({"error": msg}, status=status)
 
@@ -264,7 +310,7 @@ def make_app(db, engine):
             "queued": bool(engine.queue), "next_run": engine.next_run.isoformat() if engine.next_run else None,
             "last_run": db.meta("last_run"), "settings": public_settings(s), "stats": stats(shares, s),
             "fx": {"date": (engine.fx or {}).get("date"), "usd": ((engine.fx or {}).get("rates") or {}).get("USD")},
-            "currency": s["currency"], "shares": shares, "now": now_iso()})
+            "currency": s["currency"], "shares": shares, "log_err24": db.err24(), "now": now_iso()})
 
     @routes.get("/api/shares/{id}")
     async def share_detail(request):
@@ -287,9 +333,14 @@ def make_app(db, engine):
         try:
             res = await f.lookup(q)
         except SourceError as e:
+            detail, dur = f.take_calls()
+            db.log("err", "Suche", f"Suche „{q}“ fehlgeschlagen: {e.msg}", detail=detail, dur=dur)
             return json_error(e.msg, 502)
         finally:
             await f.close()
+        detail, dur = f.take_calls()
+        db.log("ok" if res else "info", "Suche", f"Suche „{q}“: {len(res)} Treffer"
+               + (f", erster {res[0]['symbol']} ({res[0]['exchange']})" if res else ""), detail=detail, dur=dur)
         for r in res:
             row = db.find_symbol_row(r["symbol"])
             r["exists"] = row["list"] if row else None
@@ -350,6 +401,11 @@ def make_app(db, engine):
                            str(b.get("name") or "")[:120] or None, str(b.get("exchange") or "")[:40] or None,
                            lst, **extra)
         engine.request([sid])
+        extra = []
+        if extra_q := extra_fields_text(db.share(sid)):
+            extra.append(extra_q)
+        db.log("info", "System", f"{'Zum Depot' if lst == 'depot' else 'Zu Beobachten'} hinzugefügt: {symbol}"
+               + (" · " + " · ".join(extra) if extra else ""), share=db.share(sid).get("name") or symbol)
         return web.json_response({"id": sid})
 
     @routes.patch("/api/shares/{id}")
@@ -393,6 +449,12 @@ def make_app(db, engine):
                 fields["ms_url"] = url
                 recalc = True
         db.update_share(sid, **fields)
+        if fields:
+            changed = ", ".join({"quantity": "Stückzahl", "buy_price": "Kaufkurs", "wish_price": "Wunschkurs",
+                                 "symbol": f"Symbol → {fields.get('symbol')}", "ms_url": "MarketScreener-Seite"}[k]
+                                for k in fields if k in ("quantity", "buy_price", "wish_price", "symbol", "ms_url"))
+            if changed:
+                db.log("info", "System", f"Geändert: {changed}", share=sh.get("name") or sh["symbol"])
         if recalc:
             engine.request([sid])
         return web.json_response({"ok": True})
@@ -418,14 +480,21 @@ def make_app(db, engine):
             if not qty:
                 return json_error("Bitte die Stückzahl angeben")
             db.update_share(sid, list="depot", quantity=qty, wish_price=None, wish_currency=None, **money)
+            db.log("info", "System", "Ins Depot verschoben · " + extra_fields_text(db.share(sid)),
+                   share=sh.get("name") or sh["symbol"])
         else:
             db.update_share(sid, list="watch", quantity=None, buy_price=None, buy_currency=None)
+            db.log("info", "System", "Zu Beobachten verschoben", share=sh.get("name") or sh["symbol"])
         return web.json_response({"ok": True})
 
     @routes.post("/api/shares/delete")
     async def delete_shares(request):
         b = await request.json()
         ids = [int(x) for x in b.get("ids") or []]
+        for sid in ids:
+            sh = db.share(sid)
+            if sh:
+                db.log("info", "System", f"Aus der Liste entfernt ({sh['symbol']})", share=sh.get("name") or sh["symbol"])
         db.delete_shares(ids)
         return web.json_response({"deleted": len(ids)})
 
@@ -437,6 +506,49 @@ def make_app(db, engine):
             return json_error("Die Liste ist leer")
         engine.request(ids or None)
         return web.json_response({"ok": True})
+
+    def log_query(request):
+        q = request.query
+        return dict(q=q.get("q", "").strip()[:100], level=q.get("level", ""), source=q.get("source", ""),
+                    share=q.get("share", ""))
+
+    @routes.get("/api/logs")
+    async def get_logs(request):
+        try:
+            size = max(10, min(500, int(request.query.get("size", 100))))
+            page = max(1, int(request.query.get("page", 1)))
+        except ValueError:
+            return json_error("Ungültige Seite")
+        total, items = db.logs(**log_query(request), limit=size, offset=(page - 1) * size)
+        return web.json_response({"total": total, "items": items, "facets": db.log_facets()})
+
+    @routes.get("/api/logs/download")
+    async def download_logs(request):
+        _total, items = db.logs(**log_query(request), limit=0)
+        lvl = {"ok": "OK", "info": "INFO", "warn": "WARNUNG", "err": "FEHLER", "run": "LAUF"}
+        lines = [f"My Shares {VERSION} – Log, erstellt {now_iso().replace('T', ' ')}", ""]
+        for r in reversed(items):
+            line = f"{r['ts'].replace('T', ' ')}  {lvl.get(r['level'], r['level']):8} {r['source'] or '-':15} "
+            line += (f"[{r['share']}] " if r["share"] else "") + r["msg"]
+            if r["dur"] is not None:
+                line += f"  ({r['dur']} ms)"
+            lines.append(line)
+            if r["detail"]:
+                lines.append(" " * 20 + r["detail"])
+        name = f"my_shares_log_{datetime.now():%Y-%m-%d_%H%M}.txt"
+        return web.Response(text="\n".join(lines) + "\n", content_type="text/plain", charset="utf-8",
+                            headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @routes.post("/api/logs/clear")
+    async def clear_logs(request):
+        b = await request.json()
+        mode = b.get("mode")
+        if mode not in ("all", "older7", "info"):
+            return json_error("Unbekannte Auswahl")
+        n = db.clear_logs(mode)
+        what = {"all": "alle Einträge", "older7": "Einträge älter als 7 Tage", "info": "Info-Einträge"}[mode]
+        db.log("info", "System", f"Log geleert: {what} ({n})")
+        return web.json_response({"deleted": n})
 
     @routes.get("/api/settings")
     async def get_settings(_r):
@@ -498,6 +610,13 @@ def make_app(db, engine):
                 return json_error("Unbekannte Sprache")
             new["language"] = b["language"]
         db.save_settings(new)
+        names = {"schedule_enabled": "Zeitplan an/aus", "schedule_time": "Uhrzeit", "schedule_days": "Tage",
+                 "finnhub_key": "Finnhub-Key", "weights": "Gewichte", "min_sources": "Mindestanzahl Quellen",
+                 "buy_threshold": "Kaufen-Grenze", "sell_threshold": "Verkaufen-Grenze",
+                 "language": "Sprache", "currency": "Währung"}
+        changed = [names[k] for k, v in new.items() if k in names and v != cur.get(k)]
+        if changed:
+            db.log("info", "System", "Einstellungen geändert: " + ", ".join(changed))
         engine.compute_next()
         if new_currency and not engine.fx:
             await engine.update_fx(force=True)
@@ -516,6 +635,8 @@ async def main():
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", PORT).start()
     log.info("My Shares %s läuft auf Port %d (Daten: %s)", VERSION, PORT, DATA_DIR)
+    db.prune_logs()
+    db.log("info", "System", f"My Shares {VERSION} gestartet")
     await engine.scheduler()
 
 

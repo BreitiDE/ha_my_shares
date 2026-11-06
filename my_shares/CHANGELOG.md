@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.0
+
+- Neuer Menüpunkt **Log**: zeigt jeden Abruf (Yahoo, Finnhub, Nasdaq, MarketScreener, EZB, OpenFIGI) mit Aktie,
+  Ergebnis, Adresse, HTTP-Status und Dauer, dazu Beginn und Ende jedes Laufs und eigene Aktionen
+  (Hinzufügen, Verschieben, Entfernen, Einstellungen)
+- Suche über Meldung, Aktie und Adresse, Filter nach Stufe, Quelle und Aktie, Blättern, Live-Aktualisierung
+- Log leeren: alles, älter als 7 Tage oder nur Info-Einträge; Herunterladen als Textdatei (mit aktuellem Filter)
+- Einträge älter als 30 Tage werden automatisch gelöscht; API-Keys erscheinen nie im Log
+- Rote Zahl am Menüpunkt zeigt die Fehler der letzten 24 Stunden
+
 ## 1.2.1
 
 - Alpha Vantage durch **Nasdaq** ersetzt: Alpha Vantage gibt Analystendaten nur noch mit Premium-Key heraus

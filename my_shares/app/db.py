@@ -3,7 +3,7 @@ import json
 import os
 import sqlite3
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 
 DEFAULTS = {
     "schedule_enabled": True,
@@ -42,7 +42,16 @@ CREATE TABLE IF NOT EXISTS history(share_id INTEGER NOT NULL, ts TEXT NOT NULL, 
 CREATE INDEX IF NOT EXISTS history_share ON history(share_id, ts);
 CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY, v TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS logs(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TEXT NOT NULL, level TEXT NOT NULL, source TEXT, share TEXT,
+  msg TEXT NOT NULL, detail TEXT, dur INTEGER
+);
+CREATE INDEX IF NOT EXISTS logs_ts ON logs(ts);
 """
+
+LOG_LEVELS = ("ok", "info", "warn", "err", "run")
+LOG_KEEP_DAYS = 30
 
 SHARE_COLS = ("id", "ident", "symbol", "name", "exchange", "currency", "quantity", "price", "change_pct",
               "target", "score", "score_prev", "nsources", "analysts", "sources", "updated_at", "error", "added_at",
@@ -171,3 +180,78 @@ class DB:
             rows = self.con.execute(
                 "SELECT ts, score, price FROM history WHERE share_id=? ORDER BY ts DESC LIMIT ?", (sid, limit)).fetchall()
         return [dict(r) for r in reversed(rows)]
+
+    # ---------- Log ----------
+    def log(self, level, source, msg, share=None, detail=None, dur=None):
+        with self.lock:
+            self.con.execute("INSERT INTO logs(ts, level, source, share, msg, detail, dur) VALUES(?,?,?,?,?,?,?)",
+                             (now_iso(), level, source, share, str(msg)[:500], (detail or None) and str(detail)[:1000],
+                              int(dur) if dur is not None else None))
+            self.con.commit()
+
+    @staticmethod
+    def _log_where(q="", level="", source="", share=""):
+        where, args = [], []
+        if level == "info":
+            where.append("level IN ('ok','info','run')")
+        elif level in ("warn", "err"):
+            where.append("level=?")
+            args.append(level)
+        if source:
+            where.append("source=?")
+            args.append(source)
+        if share:
+            where.append("share=?")
+            args.append(share)
+        if q:
+            like = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            where.append("(msg LIKE ? ESCAPE '\\' OR detail LIKE ? ESCAPE '\\' OR share LIKE ? ESCAPE '\\' OR source LIKE ? ESCAPE '\\')")
+            args += [like] * 4
+        return (" WHERE " + " AND ".join(where)) if where else "", args
+
+    def logs(self, q="", level="", source="", share="", limit=100, offset=0):
+        w, args = self._log_where(q, level, source, share)
+        with self.lock:
+            total = self.con.execute(f"SELECT count(*) FROM logs{w}", args).fetchone()[0]
+            sql = f"SELECT * FROM logs{w} ORDER BY id DESC"
+            rows = self.con.execute(sql + (" LIMIT ? OFFSET ?" if limit else ""),
+                                    args + ([limit, offset] if limit else [])).fetchall()
+        return total, [dict(r) for r in rows]
+
+    def log_facets(self):
+        since = (datetime.now() - timedelta(hours=24)).replace(microsecond=0).isoformat()
+        with self.lock:
+            c = self.con
+            return {
+                "total": c.execute("SELECT count(*) FROM logs").fetchone()[0],
+                "err24": c.execute("SELECT count(*) FROM logs WHERE level='err' AND ts>=?", (since,)).fetchone()[0],
+                "warn24": c.execute("SELECT count(*) FROM logs WHERE level='warn' AND ts>=?", (since,)).fetchone()[0],
+                "oldest": c.execute("SELECT min(ts) FROM logs").fetchone()[0],
+                "sources": [r[0] for r in c.execute("SELECT DISTINCT source FROM logs WHERE source IS NOT NULL ORDER BY source")],
+                "shares": [r[0] for r in c.execute("SELECT DISTINCT share FROM logs WHERE share IS NOT NULL ORDER BY share")],
+                "older7": c.execute("SELECT count(*) FROM logs WHERE ts<?",
+                                    ((datetime.now() - timedelta(days=7)).isoformat(),)).fetchone()[0],
+                "info": c.execute("SELECT count(*) FROM logs WHERE level IN ('ok','info')").fetchone()[0],
+            }
+
+    def err24(self):
+        since = (datetime.now() - timedelta(hours=24)).replace(microsecond=0).isoformat()
+        with self.lock:
+            return self.con.execute("SELECT count(*) FROM logs WHERE level='err' AND ts>=?", (since,)).fetchone()[0]
+
+    def clear_logs(self, mode):
+        with self.lock:
+            if mode == "older7":
+                cur = self.con.execute("DELETE FROM logs WHERE ts<?", ((datetime.now() - timedelta(days=7)).isoformat(),))
+            elif mode == "info":
+                cur = self.con.execute("DELETE FROM logs WHERE level IN ('ok','info')")
+            else:
+                cur = self.con.execute("DELETE FROM logs")
+            self.con.commit()
+            return cur.rowcount
+
+    def prune_logs(self, days=LOG_KEEP_DAYS):
+        with self.lock:
+            cur = self.con.execute("DELETE FROM logs WHERE ts<?", ((datetime.now() - timedelta(days=days)).isoformat(),))
+            self.con.commit()
+            return cur.rowcount

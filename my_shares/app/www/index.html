@@ -1,0 +1,997 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Shares</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+/* =====================================================================
+   BASIS-CSS  –  Styleguide v1.0 (siehe STYLEGUIDE.md)
+   Akzent #ce6c00 · hell + dunkel · keine externen Abhängigkeiten
+   Diesen Block unverändert in neue Apps übernehmen; App-eigenes CSS
+   kommt in einen eigenen Block darunter und nutzt nur die Tokens.
+   ===================================================================== */
+:root {
+  color-scheme: light;
+  --page:#f9f9f7; --surface:#fcfcfb; --field:#ffffff;
+  --ink:#0b0b0b; --ink-2:#52514e; --muted:#6b6a65;
+  --grid:#e1e0d9; --axis:#c3c2b7; --track:#f0efec;
+  --border:rgba(11,11,11,.10); --field-border:rgba(11,11,11,.20); --hover:rgba(11,11,11,.04);
+  --accent:#ce6c00; --accent-text:#a45502; --on-accent:#0b0b0b; --accent-soft:rgba(206,108,0,.12);
+  --good:#0ca30c;     --good-bg:rgba(12,163,12,.12);  --good-text:#086b08;
+  --warning:#fab219;  --warn-bg:rgba(250,178,25,.18); --warn-text:#7a5200;
+  --critical:#d03b3b; --crit-bg:rgba(208,59,59,.12);  --crit-text:#a62a2a;
+  --s1:#ce6c00; --s2:#2a78d6; --s3:#1baf7a; --s4:#6250d6; --s5:#e87ba4; --s6:#008300; --other:#b4b2a9;
+  --shadow:0 12px 40px rgba(0,0,0,.18);
+  --font:system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page:#0d0d0d; --surface:#1a1a19; --field:#232322;
+    --ink:#f0efec; --ink-2:#c3c2b7; --muted:#9a998f;
+    --grid:#2c2c2a; --axis:#383835; --track:#262624;
+    --border:rgba(255,255,255,.10); --field-border:rgba(255,255,255,.20); --hover:rgba(255,255,255,.05);
+    --accent-text:#e09156; --accent-soft:rgba(206,108,0,.18);
+    --good-bg:rgba(12,163,12,.18); --good-text:#6fd36f;
+    --warn-bg:rgba(250,178,25,.16); --warn-text:#f5c860;
+    --crit-bg:rgba(208,59,59,.18); --crit-text:#f08a8a;
+    --s2:#3987e5; --s3:#199e70; --s4:#9085e9; --s5:#d55181; --other:#5c5b56;
+    --shadow:0 12px 40px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page:#0d0d0d; --surface:#1a1a19; --field:#232322;
+  --ink:#f0efec; --ink-2:#c3c2b7; --muted:#9a998f;
+  --grid:#2c2c2a; --axis:#383835; --track:#262624;
+  --border:rgba(255,255,255,.10); --field-border:rgba(255,255,255,.20); --hover:rgba(255,255,255,.05);
+  --accent-text:#e09156; --accent-soft:rgba(206,108,0,.18);
+  --good-bg:rgba(12,163,12,.18); --good-text:#6fd36f;
+  --warn-bg:rgba(250,178,25,.16); --warn-text:#f5c860;
+  --crit-bg:rgba(208,59,59,.18); --crit-text:#f08a8a;
+  --s2:#3987e5; --s3:#199e70; --s4:#9085e9; --s5:#d55181; --other:#5c5b56;
+  --shadow:0 12px 40px rgba(0,0,0,.6);
+}
+
+/* ---------- Grundlagen ---------- */
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 var(--font); }
+a { color: var(--accent-text); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+code, .mono { font-family: var(--mono); font-size: 12.5px; }
+h1 { font-size: 20px; font-weight: 650; letter-spacing: -.01em; margin: 0; }
+h2 { font-size: 15px; font-weight: 600; margin: 0; }
+h3 { font-size: 14px; font-weight: 600; margin: 0; }
+.hint { color: var(--muted); font-size: 12px; }
+.sub  { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.t    { font-weight: 600; }
+.dimmed { color: var(--muted); }
+.num  { font-variant-numeric: tabular-nums; }
+svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+/* ---------- Seitenrahmen ---------- */
+.wrap { max-width: 1280px; margin: 0 auto; padding: 0 20px; }
+.app-header { background: var(--surface); border-bottom: 1px solid var(--border); }
+.app-header .wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 24px; padding-top: 10px; padding-bottom: 10px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 18px; color: var(--ink); text-decoration: none; }
+.brand svg { width: 26px; height: 26px; flex: none; }
+.app-nav { display: flex; flex-wrap: wrap; gap: 4px; }
+.app-nav a, .app-nav button { font: inherit; border: 0; background: transparent; color: var(--ink-2); padding: 8px 12px;
+  border-radius: 8px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+.app-nav a:hover, .app-nav button:hover { background: var(--hover); color: var(--ink); }
+.app-nav [aria-current="page"] { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
+.app-nav .count { font-size: 11px; font-weight: 500; padding: 0 6px; border-radius: 999px; background: var(--track); color: var(--ink-2); }
+.who { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 14px; color: var(--ink-2); font-size: 13px; }
+main.wrap { padding-top: 20px; padding-bottom: 48px; display: flex; flex-direction: column; gap: 16px; }
+.app-footer { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 16px; }
+.page-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 24px; }
+.page-head .facts { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--ink-2); font-size: 13px; }
+.page-head .facts b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.page-head .right, .actions .right { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+
+/* ---------- Karten und Kennzahlen ---------- */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; min-width: 0; }
+.card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 12px; }
+.card-head .right { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.grid-2 { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 12px; }
+.kpi { padding: 14px 16px; }
+.kpi .l { color: var(--ink-2); font-size: 12px; }
+.kpi .v { font-size: 26px; font-weight: 600; letter-spacing: -.02em; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.kpi .s { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.kpi.accent .v { color: var(--accent-text); }
+.kpi.bad .v { color: var(--crit-text); }
+
+/* ---------- Schaltflächen ---------- */
+.btn { font: inherit; padding: 9px 14px; min-height: 38px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--ink); cursor: pointer; display: inline-flex; align-items: center; gap: 8px;
+  text-decoration: none; white-space: nowrap; }
+.btn:hover { background: var(--hover); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+.btn.primary:hover { filter: brightness(1.06); }
+.btn.danger { color: var(--crit-text); }
+.btn.danger-fill { background: var(--critical); border-color: var(--critical); color: #fff; font-weight: 600; }
+.btn.small { padding: 5px 10px; min-height: 30px; font-size: 13px; }
+.btn:disabled { opacity: .5; cursor: default; }
+.btn .count { font-size: 12px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-text); }
+.icon-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--ink-2);
+  cursor: pointer; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; flex: none; }
+.icon-btn:hover { background: var(--hover); color: var(--ink); }
+.icon-btn.danger { color: var(--crit-text); }
+.icon-btn:disabled { opacity: .35; cursor: default; }
+.linkbtn { font: inherit; font-size: 13px; background: none; border: 0; padding: 0; color: var(--accent-text); text-decoration: underline; cursor: pointer; }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: 8px; padding: 2px; background: var(--surface); }
+.seg button { font: inherit; font-size: 13px; padding: 5px 10px; border-radius: 6px; border: 0; background: transparent; color: var(--ink-2); cursor: pointer; }
+.seg button:hover:not([aria-pressed="true"]) { background: var(--hover); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.row-actions { display: inline-flex; gap: 4px; }
+
+/* ---------- Status ---------- */
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; flex: none; }
+.dot.ok { background: var(--good); } .dot.warn { background: var(--warning); } .dot.bad { background: var(--critical); } .dot.live { background: var(--accent); }
+.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+  white-space: nowrap; background: var(--track); color: var(--ink-2); }
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.pill.ok { background: var(--good-bg); color: var(--good-text); }
+.pill.warn { background: var(--warn-bg); color: var(--warn-text); }
+.pill.bad { background: var(--crit-bg); color: var(--crit-text); }
+.pill.accent { background: var(--accent-soft); color: var(--accent-text); }
+.badge { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--border); color: var(--ink-2); white-space: nowrap; }
+.badge.accent { border-color: transparent; background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
+.bar { height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; }
+.bar > div { height: 100%; background: var(--accent); border-radius: 3px; transition: width .5s; }
+
+/* ---------- Hinweise und Meldungen ---------- */
+.notice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 14px; border-radius: 12px; font-size: 13px; }
+.notice.info { background: var(--accent-soft); color: var(--ink); }
+.notice.ok   { background: var(--good-bg); color: var(--good-text); }
+.notice.warn { background: var(--warn-bg); color: var(--warn-text); font-weight: 500; }
+.notice.bad  { background: var(--crit-bg); color: var(--crit-text); font-weight: 500; }
+.notice .right { margin-left: auto; display: flex; gap: 8px; }
+.selbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px 14px; border-radius: 12px; background: var(--accent-soft); }
+.selbar .right { margin-left: auto; display: flex; gap: 12px; }
+.empty { color: var(--muted); padding: 22px 0; text-align: center; }
+.toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 60; max-width: calc(100vw - 32px);
+  background: var(--ink); color: var(--page); padding: 10px 16px; border-radius: 8px; font-size: 13px; box-shadow: var(--shadow); }
+.toast.err { background: var(--critical); color: #fff; }
+
+/* ---------- Tabellen ---------- */
+.table-wrap { overflow-x: auto; margin: 0 -16px; padding: 0 16px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table-wrap > table { min-width: 600px; }   /* auf dem Handy horizontal scrollen statt quetschen */
+th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--axis); white-space: nowrap; }
+td { padding: 9px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.nw { white-space: nowrap; }
+td.mid { vertical-align: middle; }
+tbody tr:hover { background: var(--hover); }
+tr.sel { background: var(--accent-soft); }
+tr.off td { color: var(--muted); }
+th button.sort { font: inherit; font-size: 12px; color: var(--muted); background: none; border: 0; padding: 0; cursor: pointer; white-space: nowrap; }
+th button.sort[aria-sort] { color: var(--ink); font-weight: 600; }
+.swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; margin-right: 8px; vertical-align: -1px; }
+.pager { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 12px; color: var(--ink-2); font-size: 13px; }
+.pager .right { margin-left: auto; display: inline-flex; gap: 4px; align-items: center; }
+
+/* ---------- Formulare ---------- */
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.stack { display: flex; flex-direction: column; gap: 14px; }
+label.f, .f { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--ink-2); min-width: 0; }
+input[type=text], input[type=url], input[type=email], input[type=password], input[type=number], input[type=search],
+input[type=date], input[type=time], input[type=datetime-local], select, textarea {
+  font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--field-border);
+  background: var(--field); color: var(--ink); min-width: 0; width: 100%; }
+textarea { resize: vertical; }
+input[type=checkbox], input[type=radio] { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; flex: none; }
+.check { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink); cursor: pointer; }
+.check + .hint { margin: -8px 0 0 24px; }
+.field-err { color: var(--crit-text); font-size: 13px; margin: 0; }
+:is(input, select, textarea):user-invalid { border-color: var(--critical); }
+code.ro { display: block; font-size: 13px; padding: 8px 10px; border-radius: 8px; border: 1px dashed var(--field-border); background: var(--hover); overflow-wrap: anywhere; }
+.search { position: relative; flex: 1 1 280px; max-width: 460px; }
+.search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); }
+.search input { padding-left: 34px; }
+.switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-weight: 600; position: relative; }
+.switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.switch .track { width: 40px; height: 22px; border-radius: 11px; background: var(--axis); position: relative; transition: background .15s; flex: none; }
+.switch .track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .15s; }
+.switch input:checked + .track { background: var(--accent); }
+.switch input:checked + .track::after { transform: translateX(18px); }
+.switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
+dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 13px; }
+dl.kv dt { color: var(--muted); } dl.kv dd { margin: 0; overflow-wrap: anywhere; }
+
+/* ---------- Dialoge ---------- */
+dialog { border: 1px solid var(--border); border-radius: 12px; padding: 0; background: var(--surface); color: var(--ink);
+  box-shadow: var(--shadow); width: min(560px, calc(100vw - 24px)); max-height: calc(100vh - 32px); }
+dialog.wide { width: min(940px, calc(100vw - 24px)); }
+dialog.small { width: min(460px, calc(100vw - 24px)); }
+dialog::backdrop { background: rgba(11,11,11,.4); }
+.dlg { display: flex; flex-direction: column; max-height: calc(100vh - 34px); }
+.dlg-head { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--grid); }
+.dlg-head h2 { font-size: 16px; }
+.dlg-head .icon-btn { margin-left: auto; }
+.dlg-body { padding: 16px 20px; overflow: auto; display: flex; flex-direction: column; gap: 14px; }
+.dlg-foot { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: flex-end; padding: 14px 20px; border-top: 1px solid var(--grid); }
+.dlg-foot .grow { margin-right: auto; color: var(--ink-2); font-size: 13px; }
+
+/* ---------- Diagramme (Details: FARBDESIGN.md) ---------- */
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.tick { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--ink-2); margin-bottom: 8px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.tip { position: absolute; pointer-events: none; z-index: 5; display: none; min-width: 160px; background: var(--surface); color: var(--ink);
+  border: 1px solid var(--border); box-shadow: 0 4px 16px rgba(0,0,0,.12); border-radius: 8px; padding: 8px 10px; font-size: 12px; }
+
+/* ---------- Anmeldeseite ---------- */
+.login { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
+.login .card { width: 100%; max-width: 360px; padding: 28px 24px 24px; }
+
+/* ---------- Schmale Bildschirme ---------- */
+@media (max-width: 900px) { .grid-2 { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 700px) { .who, .page-head .right, .actions .right { margin-left: 0; } .wrap { padding: 0 16px; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+/* ======================= Ende BASIS-CSS ======================= */
+</style>
+<style>
+/* ---------- My Shares (nur Tokens) ---------- */
+.who a.btn { color: var(--ink); }
+.idx { display: flex; align-items: center; gap: 10px; min-width: 120px; }
+.idx b { font-size: 15px; font-variant-numeric: tabular-nums; min-width: 28px; text-align: right; }
+.idx .bar { flex: 1; min-width: 60px; }
+.up { color: var(--good-text); } .down { color: var(--crit-text); }
+tbody tr[data-id] { cursor: pointer; }
+.err-line { color: var(--crit-text); font-size: 12px; }
+.picks { display: flex; flex-direction: column; gap: 6px; }
+.pick { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+.pick:hover { background: var(--hover); }
+.pick:has(input:checked) { background: var(--accent-soft); border-color: var(--accent); }
+.pick.dis { opacity: .55; cursor: default; }
+.pick input { margin-top: 2px; }
+.inline { display: flex; gap: 10px; align-items: flex-end; }
+.inline > :first-child { flex: 1; }
+.days { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.score-big { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.score-big b { font-size: 26px; font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+@media (max-width: 700px) { .detail-grid { grid-template-columns: minmax(0, 1fr); } }
+.dlg-foot .left { margin-right: auto; }
+.keyrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.keyrow input { flex: 1 1 200px; width: auto; }
+td input[type=number] { width: 80px; }
+#view-list .table-wrap > table { min-width: 980px; }
+#view-list td:first-child { min-width: 190px; }
+</style>
+</head>
+<body>
+
+<header class="app-header">
+  <div class="wrap">
+    <a class="brand" href="#" id="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#ce6c00"/><path d="M7 22l6-6 4 3 8-8" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M19.5 11H25v5.5" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>My Shares</span>
+    </a>
+    <nav class="app-nav" aria-label="Hauptmenü">
+      <button data-view="list">Aktien <span class="count" id="navCount">0</span></button>
+      <button data-view="settings">Einstellungen</button>
+    </nav>
+    <div class="who">
+      <span id="status"><span class="dot"></span> <span>lädt …</span></span>
+      <span id="user" hidden></span>
+      <a class="btn small" href="https://paypal.me/breitide" target="_blank" rel="noopener" title="Unterstützen">
+        <svg class="i" viewBox="0 0 24 24"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg><span>Unterstützen</span></a>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <!-- ======================= Ansicht: Aktien ======================= -->
+  <section id="view-list" class="stack" style="gap:16px" aria-label="Aktien">
+    <div class="notice info" id="keyNotice" hidden>
+      <svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
+      <span>Finnhub und FMP liefern erst mit einem kostenlosen API-Key Daten.</span>
+      <span class="right"><button class="btn small" data-goto="settings">Keys eintragen …</button><button class="linkbtn" id="hideKeyNotice">Ausblenden</button></span>
+    </div>
+
+    <div class="page-head">
+      <h1>Aktien</h1>
+      <div class="facts" id="facts"></div>
+      <div class="right">
+        <button class="btn" id="runAll"><svg class="i" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></svg><span>Neu berechnen</span></button>
+        <button class="btn primary" id="openAdd"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>Aktie hinzufügen</span></button>
+      </div>
+    </div>
+
+    <section class="kpis" aria-label="Kennzahlen" id="kpis"></section>
+
+    <section class="card" aria-labelledby="h-list">
+      <div class="card-head">
+        <h2 id="h-list">Bewertungen</h2><span class="hint">Index 0 = stark verkaufen · 5 = halten · 10 = stark kaufen</span>
+        <div class="right">
+          <div class="seg" role="group" aria-label="Filter" id="filterSeg">
+            <button data-f="all" aria-pressed="true">Alle</button><button data-f="buy" aria-pressed="false">Kaufen</button><button data-f="hold" aria-pressed="false">Halten</button><button data-f="sell" aria-pressed="false">Verkaufen</button>
+          </div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th><button class="sort" data-sort="name">Aktie</button></th>
+            <th class="num"><button class="sort" data-sort="change">Kurs</button></th>
+            <th class="num"><button class="sort" data-sort="pot">Kursziel</button></th>
+            <th><button class="sort" data-sort="score">Index</button></th>
+            <th>Empfehlung</th>
+            <th class="num"><button class="sort" data-sort="delta">Veränderung</button></th>
+            <th class="num">Stück</th>
+            <th><button class="sort" data-sort="updated">Stand</button></th>
+            <th class="num">Aktionen</th>
+          </tr></thead>
+          <tbody id="rows"><tr><td colspan="9" class="empty">lädt …</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </section>
+
+  <!-- ======================= Ansicht: Einstellungen ======================= -->
+  <section id="view-settings" class="stack" style="gap:16px" aria-label="Einstellungen" hidden>
+    <div class="page-head"><h1>Einstellungen</h1></div>
+
+    <div class="grid-2">
+      <div class="stack" style="gap:16px">
+        <section class="card" aria-labelledby="h-src">
+          <div class="card-head"><h2 id="h-src">Datenquellen</h2><span class="hint">Gewicht 0 schaltet eine Quelle ab</span></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Quelle</th><th>Zugang</th><th class="num">Gewicht</th></tr></thead>
+              <tbody>
+                <tr><td><div class="t">Yahoo Finance – Analysten</div><div class="sub">Konsens der Analysten (1–5) und Anzahl</div></td><td class="mid"><span class="badge">ohne Key</span></td>
+                  <td class="num mid"><input type="number" min="0" max="5" step="0.5" data-w="yahoo" aria-label="Gewicht Yahoo"></td></tr>
+                <tr><td><div class="t">Finnhub – Empfehlungen</div><div class="sub">Stark kaufen bis stark verkaufen, monatlich</div>
+                    <div class="keyrow" style="margin-top:8px"><input type="password" id="finnhubKey" autocomplete="off" placeholder="neuer API-Key" aria-label="Finnhub API-Key">
+                      <button class="linkbtn" id="finnhubClear" hidden>Key entfernen</button></div>
+                    <div class="sub" style="margin-top:4px"><a href="https://finnhub.io/register" target="_blank" rel="noopener">Kostenlosen Key holen</a></div></td>
+                  <td class="mid"><span class="badge" id="finnhubBadge">kein Key</span></td>
+                  <td class="num mid"><input type="number" min="0" max="5" step="0.5" data-w="finnhub" aria-label="Gewicht Finnhub"></td></tr>
+                <tr><td><div class="t">FMP – Einstufungen</div><div class="sub">Konsens der Einstufungen und Kursziel</div>
+                    <div class="keyrow" style="margin-top:8px"><input type="password" id="fmpKey" autocomplete="off" placeholder="neuer API-Key" aria-label="FMP API-Key">
+                      <button class="linkbtn" id="fmpClear" hidden>Key entfernen</button></div>
+                    <div class="sub" style="margin-top:4px"><a href="https://site.financialmodelingprep.com/register" target="_blank" rel="noopener">Kostenlosen Key holen</a></div></td>
+                  <td class="mid"><span class="badge" id="fmpBadge">kein Key</span></td>
+                  <td class="num mid"><input type="number" min="0" max="5" step="0.5" data-w="fmp" aria-label="Gewicht FMP"></td></tr>
+                <tr><td><div class="t">Kursziel-Potenzial</div><div class="sub">Abstand des Kurses zum Kursziel der Analysten (±30 % = 0 bzw. 10)</div></td><td class="mid"><span class="badge">aus Yahoo / FMP</span></td>
+                  <td class="num mid"><input type="number" min="0" max="5" step="0.5" data-w="target" aria-label="Gewicht Kursziel"></td></tr>
+                <tr><td><div class="t">Technik</div><div class="sub">200-Tage-Linie, Momentum 3 und 12 Monate, RSI</div></td><td class="mid"><span class="badge">aus Kursverlauf</span></td>
+                  <td class="num mid"><input type="number" min="0" max="5" step="0.5" data-w="technical" aria-label="Gewicht Technik"></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="hint">Liefert eine Quelle keine Daten, verteilt sich ihr Gewicht auf die anderen. Die kostenlosen Tarife von Finnhub und FMP decken vor allem US-Aktien ab.</p>
+          <p class="field-err" id="srcErr" hidden></p>
+          <div class="actions"><button class="btn primary" id="saveSrc">Speichern</button></div>
+        </section>
+
+        <section class="card" aria-labelledby="h-rate">
+          <div class="card-head"><h2 id="h-rate">Bewertung</h2></div>
+          <div class="form-grid">
+            <label class="f">Kaufen ab (Index)<input type="number" id="buyTh" min="0" max="10" step="0.5"></label>
+            <label class="f">Verkaufen bis (Index)<input type="number" id="sellTh" min="0" max="10" step="0.5"></label>
+            <label class="f">Mindestens Quellen<input type="number" id="minSrc" min="1" max="5" step="1"></label>
+          </div>
+          <p class="hint">Mit weniger Quellen zeigt die Liste „zu wenig Daten“ statt eines Index.</p>
+          <p class="field-err" id="rateErr" hidden></p>
+          <div class="actions" style="margin-top:14px"><button class="btn primary" id="saveRate">Speichern</button></div>
+        </section>
+      </div>
+
+      <div class="stack" style="gap:16px">
+        <section class="card" aria-labelledby="h-plan">
+          <div class="card-head"><h2 id="h-plan">Zeitplan</h2></div>
+          <div class="stack">
+            <label class="switch"><input type="checkbox" id="schedOn"><span class="track"></span><span>Automatisch berechnen</span></label>
+            <label class="f">Uhrzeit<input type="time" id="schedTime"></label>
+            <div class="f">Tage<div class="days" id="schedDays"></div></div>
+            <p class="hint" id="nextRunHint"></p>
+            <p class="field-err" id="planErr" hidden></p>
+            <div class="actions"><button class="btn primary" id="savePlan">Speichern</button></div>
+          </div>
+        </section>
+
+        <section class="card" aria-labelledby="h-lang">
+          <div class="card-head"><h2 id="h-lang">Sprache</h2></div>
+          <div class="stack">
+            <label class="f">Sprache<select id="lang"><option value="auto">Automatisch</option><option value="de">Deutsch</option><option value="en">English</option></select></label>
+            <div class="actions"><button class="btn primary" id="saveLang">Speichern</button></div>
+          </div>
+        </section>
+
+        <section class="card" aria-labelledby="h-info">
+          <div class="card-head"><h2 id="h-info">Info</h2></div>
+          <dl class="kv">
+            <dt>Version</dt><dd id="infoVersion">–</dd>
+            <dt>Letzter Lauf</dt><dd id="infoLast">–</dd>
+            <dt>WKN-Suche</dt><dd>OpenFIGI, ersatzweise Yahoo</dd>
+          </dl>
+          <p class="hint" style="margin:12px 0 0">Der Index fasst Einschätzungen Dritter zusammen und ist keine Anlageberatung.</p>
+        </section>
+      </div>
+    </div>
+  </section>
+
+  <footer class="app-footer"><span id="footVersion">My Shares</span><a href="https://github.com/BreitiDE/ha_my_shares" target="_blank" rel="noopener">GitHub</a><span id="footStand"></span></footer>
+</main>
+
+<!-- ======================= Dialog: Hinzufügen ======================= -->
+<dialog id="addDlg" aria-labelledby="addTitle">
+  <form class="dlg" id="addForm">
+    <div class="dlg-head"><h2 id="addTitle">Aktie hinzufügen</h2>
+      <button class="icon-btn" type="button" data-close aria-label="Schließen" title="Schließen"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="dlg-body">
+      <div class="inline">
+        <label class="f">WKN, ISIN oder Symbol<input type="text" id="addQuery" placeholder="z. B. 716460" autocomplete="off" required></label>
+        <button class="btn" type="button" id="addSearch"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><span>Suchen</span></button>
+      </div>
+      <div id="addResults" class="picks"></div>
+      <label class="f">Stückzahl (optional)<input type="text" inputmode="decimal" id="addQty" placeholder="z. B. 25"></label>
+      <p class="hint" style="margin:-6px 0 0">Mit Stückzahl zeigt die Übersicht den Depotwert.</p>
+      <p class="field-err" id="addErr" hidden></p>
+    </div>
+    <div class="dlg-foot"><span class="grow" id="addInfo"></span>
+      <button class="btn" type="button" data-close>Abbrechen</button><button class="btn primary" type="submit" id="addOk" disabled>Hinzufügen</button></div>
+  </form>
+</dialog>
+
+<!-- ======================= Dialog: Details ======================= -->
+<dialog id="detDlg" class="wide" aria-labelledby="detTitle">
+  <form class="dlg" id="detForm">
+    <div class="dlg-head"><h2 id="detTitle">Aktie</h2>
+      <button class="icon-btn" type="button" data-close aria-label="Schließen" title="Schließen"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="dlg-body" id="detBody"><div class="empty">lädt …</div></div>
+    <div class="dlg-foot">
+      <button class="btn danger left" type="button" id="detDel">Entfernen …</button>
+      <button class="btn" type="button" id="detRun">Neu berechnen</button>
+      <button class="btn primary" type="submit" id="detSave">Speichern</button></div>
+  </form>
+</dialog>
+
+<dialog id="confirmDlg" class="small" aria-labelledby="confirmTitle">
+  <div class="dlg">
+    <div class="dlg-head"><h2 id="confirmTitle"></h2></div>
+    <div class="dlg-body"><p style="margin:0" id="confirmText"></p></div>
+    <div class="dlg-foot"><button class="btn" id="confirmNo">Abbrechen</button><button class="btn primary" id="confirmYes">OK</button></div>
+  </div>
+</dialog>
+
+<script src="lang-en.js"></script>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const SRC = ["yahoo", "finnhub", "fmp", "target", "technical"];
+const SRC_NAME = { yahoo: "Yahoo Finance – Analysten", finnhub: "Finnhub – Empfehlungen", fmp: "FMP – Einstufungen",
+  target: "Kursziel-Potenzial", technical: "Technik" };
+const ICON = {
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/>',
+  reload: '<path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/>',
+  trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
+};
+const icon = n => `<svg class="i" viewBox="0 0 24 24">${ICON[n]}</svg>`;
+
+// ---------- Sprache ----------
+let LANG = "de", LOC = "de-DE";
+const EN = window.LANG_EN || {};
+function t(s, v) {
+  let r = LANG === "en" && EN[s] ? EN[s] : s;
+  if (v) r = r.replace(/\{(\w+)\}/g, (m, k) => (v[k] ?? m));
+  return r;
+}
+function setLang(pref) {
+  LANG = pref === "en" || (pref === "auto" && !/^de/i.test(navigator.language || "de")) ? "en" : "de";
+  LOC = LANG === "en" ? "en-GB" : "de-DE";
+  document.documentElement.lang = LANG;
+}
+function translateDom(root = document.body) {
+  if (LANG !== "en") return;
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n; (n = w.nextNode());) {
+    const s = n.nodeValue.trim();
+    if (s && EN[s]) n.nodeValue = n.nodeValue.replace(s, EN[s]);
+  }
+  root.querySelectorAll("[placeholder],[title],[aria-label]").forEach(el => {
+    for (const a of ["placeholder", "title", "aria-label"]) {
+      const v = el.getAttribute(a);
+      if (v && EN[v]) el.setAttribute(a, EN[v]);
+    }
+  });
+}
+
+// ---------- Formate ----------
+const nf = (v, d = 1) => v == null || isNaN(v) ? "–" : new Intl.NumberFormat(LOC, { minimumFractionDigits: d, maximumFractionDigits: d }).format(v);
+function money(v, cur) {
+  if (v == null || isNaN(v)) return "–";
+  const d = v < 10 ? 3 : 2;
+  try { return new Intl.NumberFormat(LOC, { style: "currency", currency: cur || "EUR", minimumFractionDigits: 2, maximumFractionDigits: d }).format(v); }
+  catch { return nf(v, 2) + " " + (cur || ""); }
+}
+function bigMoney(v, cur) {
+  try { return new Intl.NumberFormat(LOC, { style: "currency", currency: cur || "EUR", maximumFractionDigits: 0 }).format(v); }
+  catch { return nf(v, 0) + " " + (cur || ""); }
+}
+const pct = (v, d = 1) => v == null || isNaN(v) ? "–" : (v > 0 ? "+" : v < 0 ? "−" : "") + nf(Math.abs(v * 100), d) + " %";
+const DAYS = { de: ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"], en: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] };
+const p2 = n => String(n).padStart(2, "0");
+function dt(iso, withDay = true) {
+  if (!iso) return "–";
+  const d = new Date(iso);
+  if (isNaN(d)) return "–";
+  const day = withDay ? DAYS[LANG][d.getDay()] + " " : "";
+  const date = LANG === "en" ? `${p2(d.getDate())}/${p2(d.getMonth() + 1)}` : `${p2(d.getDate())}.${p2(d.getMonth() + 1)}.`;
+  return `${day}${date} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+}
+const hm = iso => { const d = new Date(iso); return `${p2(d.getHours())}:${p2(d.getMinutes())}`; };
+const sameDay = (a, b) => a.toDateString() === b.toDateString();
+
+// ---------- API ----------
+async function api(path, opts = {}) {
+  const r = await fetch("api/" + path, {
+    method: opts.method || "GET",
+    headers: { "X-App": "1", ...(opts.body ? { "content-type": "application/json" } : {}) },
+    body: opts.body ? JSON.stringify(opts.body) : undefined, credentials: "same-origin" });
+  const data = (r.headers.get("content-type") || "").includes("json") ? await r.json() : await r.text();
+  if (!r.ok) throw new Error(t((data && data.error) || "HTTP " + r.status));
+  return data;
+}
+
+// ---------- Rückmeldungen ----------
+let toastT;
+function toast(msg, isErr) {
+  document.querySelector(".toast")?.remove(); clearTimeout(toastT);
+  const d = document.createElement("div");
+  d.className = "toast" + (isErr ? " err" : ""); d.setAttribute("role", "status"); d.textContent = msg;
+  document.body.appendChild(d); toastT = setTimeout(() => d.remove(), isErr ? 6000 : 3000);
+}
+function ask(title, text, ok = "OK", danger = false) {
+  return new Promise(res => {
+    const d = $("confirmDlg");
+    $("confirmTitle").textContent = title; $("confirmText").textContent = text;
+    $("confirmYes").textContent = ok; $("confirmYes").className = "btn " + (danger ? "danger-fill" : "primary");
+    const done = v => { d.close(); res(v); };
+    $("confirmYes").onclick = () => done(true); $("confirmNo").onclick = () => done(false);
+    d.oncancel = e => { e.preventDefault(); done(false); };
+    d.showModal(); $("confirmYes").focus();
+  });
+}
+function showErr(el, msg) { if (!el) { if (msg) toast(msg, true); return; } el.textContent = msg || ""; el.hidden = !msg; }
+document.querySelectorAll("dialog").forEach(d => d.addEventListener("click", e => { if (e.target.closest("[data-close]")) d.close(); }));
+
+// ---------- Zustand ----------
+let ST = null, VIEW = "list", FILTER = "all", SORT = { k: "score", dir: -1 }, failed = false, pollT;
+try {
+  VIEW = localStorage.getItem("ms-view") || "list";
+  FILTER = localStorage.getItem("ms-filter") || "all";
+  SORT = JSON.parse(localStorage.getItem("ms-sort") || "null") || SORT;
+} catch {}
+const store = (k, v) => { try { localStorage.setItem(k, typeof v === "string" ? v : JSON.stringify(v)); } catch {} };
+
+const LABEL = { buy: ["Kaufen", "ok"], hold: ["Halten", ""], sell: ["Verkaufen", "bad"], none: ["zu wenig Daten", ""] };
+function pill(sh) {
+  if (sh.score == null && !sh.updated_at) {
+    return ST && (ST.running || ST.queued) ? `<span class="pill accent">${t("wird berechnet")}</span>` : `<span class="pill">${t("offen")}</span>`;
+  }
+  const [txt, cls] = LABEL[sh.label] || LABEL.none;
+  return `<span class="pill ${cls}">${t(txt)}</span>`;
+}
+const pot = sh => sh.target && sh.price ? sh.target / sh.price - 1 : null;
+const delta = sh => sh.score != null && sh.score_prev != null ? sh.score - sh.score_prev : null;
+function deltaHtml(d) {
+  if (d == null) return '<span class="dimmed">–</span>';
+  if (Math.abs(d) < 0.05) return `<span class="dimmed">→ ${nf(0)}</span>`;
+  return d > 0 ? `<span class="up">↑ ${nf(d)}</span>` : `<span class="down">↓ ${nf(-d)}</span>`;
+}
+
+// ---------- Ansichten ----------
+function show(view) {
+  VIEW = view === "settings" ? "settings" : "list"; store("ms-view", VIEW);
+  $("view-list").hidden = VIEW !== "list"; $("view-settings").hidden = VIEW !== "settings";
+  document.querySelectorAll(".app-nav [data-view]").forEach(b => b.dataset.view === VIEW ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current"));
+  if (VIEW === "settings" && ST) fillSettings();
+}
+document.querySelectorAll("[data-view]").forEach(b => b.onclick = () => show(b.dataset.view));
+document.querySelectorAll("[data-goto]").forEach(b => b.onclick = () => show(b.dataset.goto));
+$("brand").onclick = e => { e.preventDefault(); show("list"); };
+
+// ---------- Laden ----------
+async function refresh() {
+  clearTimeout(pollT);
+  try {
+    ST = await api("state");
+    failed = false;
+    render();
+  } catch (e) {
+    failed = true;
+    renderStatus();
+  }
+  pollT = setTimeout(refresh, ST && (ST.running || ST.queued) ? 3000 : 30000);
+}
+
+function renderStatus() {
+  const el = $("status");
+  let dot = "ok", txt = t("Bereit");
+  if (failed) { dot = "bad"; txt = t("Server nicht erreichbar"); }
+  else if (ST.running) { dot = "live"; txt = t("berechnet {d}/{n}", { d: ST.progress.done, n: ST.progress.total }); }
+  else if (ST.queued) { dot = "live"; txt = t("startet …"); }
+  else if (ST.stats.errors) { dot = "warn"; txt = t(ST.stats.errors === 1 ? "1 Aktie mit Fehler" : "{n} Aktien mit Fehler", { n: ST.stats.errors }); }
+  el.innerHTML = `<span class="dot ${dot}"></span> <span>${esc(txt)}</span>`;
+}
+
+function render() {
+  renderStatus();
+  const s = ST.stats, set = ST.settings;
+  $("navCount").textContent = s.count;
+  if (ST.user) { $("user").hidden = false; $("user").innerHTML = `${esc(t("angemeldet als"))} <b>${esc(ST.user)}</b>`; }
+  $("footVersion").textContent = "My Shares " + ST.version;
+  $("footStand").textContent = t("Aktualisiert sich alle 30 s · Stand {t}", { t: new Date().toLocaleTimeString(LOC) });
+  $("runAll").disabled = ST.running || ST.queued || !s.count;
+  $("runAll").querySelector("span").textContent = ST.running ? t("berechnet …") : t("Neu berechnen");
+
+  // Hinweis auf fehlende Keys
+  let hidden = false; try { hidden = localStorage.getItem("ms-hide-keys") === "1"; } catch {}
+  const missing = (!set.finnhub_key_set && set.weights.finnhub > 0) || (!set.fmp_key_set && set.weights.fmp > 0);
+  $("keyNotice").hidden = !missing || hidden;
+
+  // Fakten
+  const active = SRC.filter(k => set.weights[k] > 0 && !((k === "finnhub" && !set.finnhub_key_set) || (k === "fmp" && !set.fmp_key_set))).length;
+  $("facts").innerHTML = [
+    `<span><b>${active}</b> ${esc(t("von 5 Quellen aktiv"))}</span>`,
+    `<span>${esc(t("Nächster Lauf"))} <b>${ST.next_run ? esc(dt(ST.next_run)) : esc(t("aus"))}</b></span>`,
+  ].join("");
+
+  // Kennzahlen
+  const c = s.counts;
+  const avgLabel = s.avg == null ? "" : s.avg >= set.buy_threshold ? "Kaufen" : s.avg <= set.sell_threshold ? "Verkaufen" : "Halten";
+  const cur = Object.keys(s.depot);
+  cur.sort((a, b) => s.depot[b] - s.depot[a]);
+  const depotV = cur.length ? esc(bigMoney(s.depot[cur[0]], cur[0])) : "–";
+  const depotS = cur.length > 1 ? "+ " + cur.slice(1).map(k => bigMoney(s.depot[k], k)).join(" + ") + " · " + t("Stückzahl × aktueller Kurs")
+    : t(cur.length ? "Stückzahl × aktueller Kurs" : "Stückzahl in den Details eintragen");
+  let lastV = "–", lastS = t("noch nicht berechnet");
+  if (s.last_update) {
+    const d = new Date(s.last_update);
+    lastV = sameDay(d, new Date()) ? hm(s.last_update) : dt(s.last_update, false).split(" ")[0];
+    lastS = (sameDay(d, new Date()) ? t("heute") : dt(s.last_update)) + (ST.next_run ? " · " + t("nächster Lauf {t}", { t: dt(ST.next_run) }) : "");
+  }
+  const runKpi = ST.running
+    ? `<div class="card kpi accent"><div class="l">${esc(t("Berechnung läuft"))}</div><div class="v">${ST.progress.done}/${ST.progress.total}</div><div class="s">${esc(ST.progress.current || "")}</div></div>`
+    : `<div class="card kpi"><div class="l">${esc(t("Letzte Aktualisierung"))}</div><div class="v">${esc(lastV)}</div><div class="s">${esc(lastS)}</div></div>`;
+  $("kpis").innerHTML = `
+    <div class="card kpi"><div class="l">${esc(t("Aktien"))}</div><div class="v">${s.count}</div>
+      <div class="s">${esc(t("{b} Kaufen · {h} Halten · {s} Verkaufen", { b: c.buy, h: c.hold, s: c.sell }))}</div></div>
+    <div class="card kpi"><div class="l">${esc(t("Gesamtbewertung"))}</div><div class="v">${s.avg == null ? "–" : esc(nf(s.avg))}</div>
+      <div class="s">${s.avg == null ? esc(t("noch kein Index")) : esc(t(avgLabel)) + " · " + esc(t(s.weighted ? "nach Depotwert gewichtet" : "Durchschnitt aller Aktien"))}</div></div>
+    <div class="card kpi"><div class="l">${esc(t("Depotwert"))}</div><div class="v">${depotV}</div>
+      <div class="s">${esc(depotS)}</div></div>
+    ${runKpi}`;
+
+  // Filter und Sortierung
+  document.querySelectorAll("#filterSeg button").forEach(b => b.setAttribute("aria-pressed", b.dataset.f === FILTER));
+  document.querySelectorAll("th button.sort").forEach(b => {
+    const on = b.dataset.sort === SORT.k;
+    b.textContent = t(b.dataset.label || (b.dataset.label = b.textContent.replace(/ [↑↓]$/, ""))) + (on ? (SORT.dir < 0 ? " ↓" : " ↑") : "");
+    on ? b.setAttribute("aria-sort", SORT.dir < 0 ? "descending" : "ascending") : b.removeAttribute("aria-sort");
+  });
+  renderRows();
+  if (VIEW === "settings" && !settingsDirty) fillSettings();
+}
+
+function sortVal(sh, k) {
+  switch (k) {
+    case "name": return (sh.name || sh.symbol || "").toLowerCase();
+    case "change": return sh.change_pct;
+    case "pot": return pot(sh);
+    case "delta": return delta(sh);
+    case "updated": return sh.updated_at || "";
+    default: return sh.score;
+  }
+}
+
+function renderRows() {
+  let list = ST.shares.slice();
+  if (FILTER !== "all") list = list.filter(x => x.label === FILTER);
+  list.sort((a, b) => {
+    const va = sortVal(a, SORT.k), vb = sortVal(b, SORT.k);
+    if (va == null && vb == null) return 0;
+    if (va == null) return 1;
+    if (vb == null) return -1;
+    return (va < vb ? -1 : va > vb ? 1 : 0) * SORT.dir;
+  });
+  if (!list.length) {
+    const msg = ST.shares.length ? t("Keine Aktien passen zum Filter.") : t("Noch keine Aktien. Füge eine mit „Aktie hinzufügen“ hinzu.");
+    $("rows").innerHTML = `<tr><td colspan="9" class="empty">${esc(msg)}</td></tr>`;
+    return;
+  }
+  $("rows").innerHTML = list.map(sh => {
+    const p = pot(sh);
+    const ident = sh.ident && sh.ident !== sh.symbol ? `${sh.ident} · ` : "";
+    const sub = `${ident}${sh.symbol}${sh.exchange ? " · " + sh.exchange : ""}`;
+    const err = sh.error ? `<div class="err-line">${esc(t(sh.error))}</div>` : "";
+    const idx = sh.score == null ? '<span class="dimmed">–</span>'
+      : `<div class="idx"><b>${esc(nf(sh.score))}</b><div class="bar" role="img" aria-label="${esc(nf(sh.score))} / 10"><div style="width:${sh.score * 10}%"></div></div></div>`;
+    return `<tr data-id="${sh.id}">
+      <td><div class="t">${esc(sh.name || sh.symbol)}</div><div class="sub">${esc(sub)}</div>${err}</td>
+      <td class="num">${esc(money(sh.price, sh.currency))}<div class="sub ${sh.change_pct > 0 ? "up" : sh.change_pct < 0 ? "down" : ""}">${esc(pct(sh.change_pct))}</div></td>
+      <td class="num">${esc(money(sh.target, sh.currency))}<div class="sub">${esc(pct(p))}</div></td>
+      <td class="mid">${idx}</td>
+      <td class="mid">${pill(sh)}</td>
+      <td class="num mid">${deltaHtml(delta(sh))}</td>
+      <td class="num mid">${sh.quantity ? esc(nf(sh.quantity, sh.quantity % 1 ? 2 : 0)) : '<span class="dimmed">–</span>'}</td>
+      <td class="nw">${esc(dt(sh.updated_at))}<div class="sub">${esc(t("{n} von 5 Quellen", { n: sh.nsources || 0 }))}${sh.analysts ? " · " + esc(t("{n} Analysten", { n: sh.analysts })) : ""}</div></td>
+      <td class="num mid"><span class="row-actions">
+        <button class="icon-btn" data-act="edit" aria-label="${esc(t("Details"))}" title="${esc(t("Details"))}">${icon("edit")}</button>
+        <button class="icon-btn" data-act="run" aria-label="${esc(t("Neu berechnen"))}" title="${esc(t("Neu berechnen"))}" ${ST.running ? "disabled" : ""}>${icon("reload")}</button>
+        <button class="icon-btn danger" data-act="del" aria-label="${esc(t("Entfernen"))}" title="${esc(t("Entfernen"))}">${icon("trash")}</button>
+      </span></td></tr>`;
+  }).join("");
+}
+
+$("rows").addEventListener("click", async e => {
+  const tr = e.target.closest("tr[data-id]"); if (!tr) return;
+  const id = +tr.dataset.id, sh = ST.shares.find(x => x.id === id);
+  const act = e.target.closest("[data-act]")?.dataset.act || "edit";
+  if (act === "edit") openDetail(id);
+  if (act === "run") runIds([id]);
+  if (act === "del") removeShare(sh);
+});
+$("filterSeg").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  FILTER = b.dataset.f; store("ms-filter", FILTER); render();
+});
+document.querySelectorAll("th button.sort").forEach(b => b.onclick = () => {
+  const k = b.dataset.sort;
+  SORT = SORT.k === k ? { k, dir: -SORT.dir } : { k, dir: k === "name" ? 1 : -1 };
+  store("ms-sort", SORT); render();
+});
+$("hideKeyNotice").onclick = () => { store("ms-hide-keys", "1"); $("keyNotice").hidden = true; };
+
+// ---------- Aktionen ----------
+async function runIds(ids) {
+  try {
+    await api("run", { method: "POST", body: { ids } });
+    toast(ids.length ? t("Berechnung gestartet") : t("Alle Aktien werden neu berechnet"));
+    setTimeout(refresh, 400);
+  } catch (e) { toast(e.message, true); }
+}
+$("runAll").onclick = () => runIds([]);
+
+async function removeShare(sh) {
+  if (!sh) return false;
+  const name = sh.name || sh.symbol;
+  if (!await ask(t("Aktie entfernen?"), t("„{n}“ wird mit ihrem Verlauf aus der Liste entfernt.", { n: name }), t("Entfernen"), true)) return false;
+  try {
+    await api("shares/delete", { method: "POST", body: { ids: [sh.id] } });
+    toast(t("„{n}“ entfernt", { n: name }));
+    refresh();
+    return true;
+  } catch (e) { toast(e.message, true); return false; }
+}
+
+// ---------- Hinzufügen ----------
+let picks = [];
+$("openAdd").onclick = () => {
+  $("addForm").reset(); $("addResults").innerHTML = ""; picks = []; $("addOk").disabled = true;
+  $("addInfo").textContent = ""; showErr($("addErr"));
+  $("addDlg").showModal(); $("addQuery").focus();
+};
+async function doSearch() {
+  const q = $("addQuery").value.trim();
+  showErr($("addErr"));
+  if (q.length < 2) { showErr($("addErr"), t("Bitte WKN, ISIN oder Symbol eingeben")); return; }
+  const b = $("addSearch"), lbl = b.querySelector("span");
+  b.disabled = true; lbl.textContent = t("sucht …"); $("addOk").disabled = true;
+  try {
+    const r = await api("lookup", { method: "POST", body: { query: q } });
+    picks = r.results;
+    if (!picks.length) {
+      $("addResults").innerHTML = `<div class="empty" style="padding:10px 0">${esc(t("Nichts gefunden. Prüfe die Nummer oder gib das Börsensymbol ein (z. B. SAP.DE)."))}</div>`;
+    } else {
+      $("addResults").innerHTML = picks.map((p, i) => `
+        <label class="pick ${p.exists ? "dis" : ""}"><input type="radio" name="pick" value="${i}" ${p.exists ? "disabled" : ""}>
+          <div><div class="t">${esc(p.name)}</div><div class="sub">${esc([p.symbol, p.exchange, p.type].filter(Boolean).join(" · "))}</div>
+          ${p.exists ? `<span class="badge" style="margin-top:4px">${esc(t("schon in der Liste"))}</span>` : ""}</div></label>`).join("");
+      const first = $("addResults").querySelector("input:not([disabled])");
+      if (first) { first.checked = true; $("addOk").disabled = false; }
+      $("addInfo").textContent = t(picks.length === 1 ? "1 Treffer" : "{n} Treffer", { n: picks.length });
+    }
+  } catch (e) { showErr($("addErr"), e.message); }
+  finally { b.disabled = false; lbl.textContent = t("Suchen"); }
+}
+$("addSearch").onclick = doSearch;
+$("addQuery").addEventListener("keydown", e => { if (e.key === "Enter" && !document.querySelector('input[name=pick]:checked')) { e.preventDefault(); doSearch(); } });
+$("addQuery").addEventListener("input", () => { picks = []; $("addResults").innerHTML = ""; $("addOk").disabled = true; $("addInfo").textContent = ""; });
+$("addResults").addEventListener("change", () => { $("addOk").disabled = !document.querySelector("input[name=pick]:checked"); });
+$("addForm").onsubmit = async e => {
+  e.preventDefault();
+  const sel = document.querySelector("input[name=pick]:checked");
+  if (!sel) { doSearch(); return; }
+  const p = picks[+sel.value];
+  $("addOk").disabled = true;
+  try {
+    await api("shares", { method: "POST", body: { ident: $("addQuery").value.trim(), symbol: p.symbol, name: p.name, exchange: p.exchange, quantity: $("addQty").value.trim() } });
+    $("addDlg").close();
+    toast(t("„{n}“ hinzugefügt · wird berechnet", { n: p.name }));
+    refresh();
+  } catch (err) { showErr($("addErr"), err.message); $("addOk").disabled = false; }
+};
+
+// ---------- Details ----------
+let DET = null;
+function srcData(k, s, cur) {
+  if (!s) return t("keine Daten");
+  switch (s.status) {
+    case "off": return t("abgeschaltet (Gewicht 0)");
+    case "nokey": return t("kein API-Key");
+    case "nodata": return t("keine Daten");
+    case "noaccess": return t("kein Zugriff im kostenlosen Tarif") + (s.msg ? ` (${s.msg})` : "");
+    case "error": return t("Fehler") + ": " + t(s.msg || "");
+  }
+  if (k === "yahoo") return t("Ø {m} auf der Skala 1 (stark kaufen) bis 5 · {n} Analysten", { m: nf(s.mean, 2), n: s.n });
+  if (k === "finnhub" || k === "fmp") {
+    const [sb, b, h, se, ss] = s.counts || [];
+    return t("{sb} stark kaufen · {b} kaufen · {h} halten · {s} verkaufen · {ss} stark verkaufen", { sb, b, h, s: se, ss }) + (s.period ? " · " + s.period : "");
+  }
+  if (k === "target") return t("Kursziel {t} · Potenzial {p}", { t: money(s.target, cur), p: pct(s.pot) });
+  if (k === "technical") {
+    const parts = [];
+    if (s.sma200 != null) parts.push(t("200-Tage-Linie {v}", { v: pct(s.sma200) }));
+    if (s.m3 != null) parts.push(t("3 Monate {v}", { v: pct(s.m3) }));
+    if (s.m12 != null) parts.push(t("12 Monate {v}", { v: pct(s.m12) }));
+    if (s.rsi != null) parts.push("RSI " + nf(s.rsi, 0));
+    return parts.join(" · ");
+  }
+  return "";
+}
+
+function histChart(h) {
+  const pts = h.filter(x => x.score != null);
+  if (pts.length < 2) return `<p class="hint" style="margin:0">${esc(t("Der Verlauf erscheint ab der zweiten Berechnung."))}</p>`;
+  const W = 600, H = 150, L = 28, R = 8, T = 8, B = 22;
+  const x = i => L + (W - L - R) * (pts.length === 1 ? 0 : i / (pts.length - 1));
+  const y = v => T + (H - T - B) * (1 - v / 10);
+  const line = pts.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.score).toFixed(1)}`).join(" ");
+  const grid = [0, 5, 10].map(v => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(${v ? "--grid" : "--axis"})"/><text class="tick" x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${v}</text>`).join("");
+  const first = pts[0].ts, last = pts[pts.length - 1].ts;
+  return `<div class="chart"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(t("Verlauf des Index"))}">${grid}
+    <path d="${line}" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${x(pts.length - 1)}" cy="${y(pts[pts.length - 1].score)}" r="3.5" fill="var(--s1)"/>
+    <text class="tick" x="${L}" y="${H - 4}">${esc(dt(first, false).split(" ")[0])}</text>
+    <text class="tick" x="${W - R}" y="${H - 4}" text-anchor="end">${esc(dt(last, false).split(" ")[0])}</text></svg></div>`;
+}
+
+async function openDetail(id) {
+  DET = null;
+  $("detTitle").textContent = t("Aktie");
+  $("detBody").innerHTML = `<div class="empty">${esc(t("lädt …"))}</div>`;
+  if (!$("detDlg").open) $("detDlg").showModal();
+  try { DET = await api("shares/" + id); } catch (e) { $("detBody").innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; return; }
+  const sh = DET, w = ST.settings.weights;
+  $("detTitle").textContent = sh.name || sh.symbol;
+  const rows = SRC.map(k => {
+    const s = sh.sources[k], ok = s && s.status === "ok";
+    return `<tr class="${ok ? "" : "off"}"><td><div class="t">${esc(t(SRC_NAME[k]))}</div></td><td>${esc(srcData(k, s, sh.currency))}</td>
+      <td class="num">${ok && s.score != null ? `<b>${esc(nf(s.score))}</b>` : "–"}</td><td class="num">${esc(nf(w[k]))}</td></tr>`;
+  }).join("");
+  const p = pot(sh);
+  $("detBody").innerHTML = `
+    <div class="score-big"><b>${sh.score == null ? "–" : esc(nf(sh.score))}</b>${pill(sh)}
+      <span class="hint">${esc(t("aus {n} von 5 Quellen", { n: sh.nsources || 0 }))}${sh.analysts ? " · " + esc(t("{n} Analysten", { n: sh.analysts })) : ""}</span></div>
+    ${sh.error ? `<div class="notice bad">${esc(t(sh.error))}</div>` : ""}
+    <div class="detail-grid">
+      <dl class="kv">
+        <dt>${esc(t("Symbol"))}</dt><dd><code>${esc(sh.symbol)}</code></dd>
+        <dt>${esc(t("WKN / ISIN"))}</dt><dd>${esc(sh.ident || "–")}</dd>
+        <dt>${esc(t("Börse"))}</dt><dd>${esc(sh.exchange || "–")}</dd>
+        <dt>${esc(t("Kurs"))}</dt><dd class="num">${esc(money(sh.price, sh.currency))} <span class="hint">${esc(pct(sh.change_pct))}</span></dd>
+        <dt>${esc(t("Kursziel"))}</dt><dd class="num">${esc(money(sh.target, sh.currency))} <span class="hint">${esc(pct(p))}</span></dd>
+        <dt>${esc(t("Stand"))}</dt><dd>${esc(dt(sh.updated_at))}</dd>
+      </dl>
+      <div>${histChart(sh.history || [])}</div>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>${esc(t("Quelle"))}</th><th>${esc(t("Daten"))}</th><th class="num">${esc(t("Wert"))}</th><th class="num">${esc(t("Gewicht"))}</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    <div class="form-grid">
+      <label class="f">${esc(t("Stückzahl"))}<input type="text" inputmode="decimal" id="detQty" value="${sh.quantity ?? ""}" placeholder="${esc(t("z. B. 25"))}"></label>
+      <label class="f">${esc(t("Symbol (Yahoo)"))}<input type="text" id="detSym" value="${esc(sh.symbol)}" autocomplete="off"></label>
+    </div>
+    <p class="hint" style="margin:-6px 0 0">${esc(t("Symbol nur ändern, wenn die Zuordnung falsch ist, z. B. SAP.DE für Xetra oder SAP für die USA."))}</p>
+    <p class="field-err" id="detErr" hidden></p>`;
+  $("detQty").focus({ preventScroll: true });
+}
+$("detForm").onsubmit = async e => {
+  e.preventDefault();
+  if (!DET) return;
+  showErr($("detErr"));
+  try {
+    await api("shares/" + DET.id, { method: "PATCH", body: { quantity: $("detQty").value.trim(), symbol: $("detSym").value.trim() } });
+    $("detDlg").close(); toast(t("Gespeichert")); refresh();
+  } catch (err) { showErr($("detErr"), err.message); }
+};
+$("detRun").onclick = async () => { if (DET) { await runIds([DET.id]); $("detDlg").close(); } };
+$("detDel").onclick = async () => { if (DET && await removeShare(DET)) $("detDlg").close(); };
+
+// ---------- Einstellungen ----------
+let settingsDirty = false;
+$("view-settings").addEventListener("input", () => { settingsDirty = true; });
+function fillSettings() {
+  const s = ST.settings;
+  $("schedOn").checked = !!s.schedule_enabled;
+  $("schedTime").value = s.schedule_time;
+  const order = [1, 2, 3, 4, 5, 6, 0];   // Mo … So, JS-Tag; Server: Mo = 0
+  $("schedDays").innerHTML = order.map(js => {
+    const py = (js + 6) % 7;
+    return `<label class="check"><input type="checkbox" value="${py}" ${s.schedule_days.includes(py) ? "checked" : ""}><span>${DAYS[LANG][js]}</span></label>`;
+  }).join("");
+  $("nextRunHint").textContent = ST.next_run ? t("Nächster Lauf: {t}", { t: dt(ST.next_run) }) : t("Kein Lauf geplant.");
+  document.querySelectorAll("[data-w]").forEach(i => i.value = s.weights[i.dataset.w]);
+  for (const k of ["finnhub", "fmp"]) {
+    const set = s[k + "_key_set"];
+    $(k + "Badge").textContent = t(set ? "Key gespeichert" : "kein Key");
+    $(k + "Badge").className = "badge" + (set ? " accent" : "");
+    $(k + "Clear").hidden = !set;
+    $(k + "Key").value = "";
+  }
+  $("buyTh").value = s.buy_threshold; $("sellTh").value = s.sell_threshold; $("minSrc").value = s.min_sources;
+  $("lang").value = s.language;
+  $("infoVersion").textContent = ST.version;
+  const lr = ST.last_run;
+  $("infoLast").textContent = lr ? `${dt(lr.ts)} · ${t("{n} Aktien", { n: lr.count })}${lr.errors ? " · " + t("{n} Fehler", { n: lr.errors }) : ""}` : "–";
+  settingsDirty = false;
+}
+async function saveSettings(body, btn, errEl, msg) {
+  showErr(errEl);
+  btn.disabled = true;
+  try {
+    ST.settings = await api("settings", { method: "PUT", body });
+    toast(msg || t("Einstellungen gespeichert"));
+    settingsDirty = false;
+    await refresh();
+    fillSettings();
+    return true;
+  } catch (e) { showErr(errEl, e.message); return false; }
+  finally { btn.disabled = false; }
+}
+$("savePlan").onclick = () => saveSettings({
+  schedule_enabled: $("schedOn").checked, schedule_time: $("schedTime").value,
+  schedule_days: [...$("schedDays").querySelectorAll("input:checked")].map(i => +i.value) }, $("savePlan"), $("planErr"));
+$("saveSrc").onclick = () => {
+  const weights = {}; document.querySelectorAll("[data-w]").forEach(i => weights[i.dataset.w] = i.value);
+  const body = { weights };
+  for (const k of ["finnhub", "fmp"]) { const v = $(k + "Key").value.trim(); if (v) body[k + "_key"] = v; }
+  saveSettings(body, $("saveSrc"), $("srcErr"));
+};
+for (const k of ["finnhub", "fmp"]) {
+  $(k + "Clear").onclick = async () => {
+    if (await ask(t("Key entfernen?"), t("Ohne Key liefert diese Quelle keine Daten mehr."), t("Entfernen"), true))
+      saveSettings({ [k + "_key_clear"]: true }, $("saveSrc"), $("srcErr"), t("Key entfernt"));
+  };
+}
+$("saveRate").onclick = () => saveSettings({ buy_threshold: $("buyTh").value, sell_threshold: $("sellTh").value, min_sources: $("minSrc").value }, $("saveRate"), $("rateErr"));
+$("saveLang").onclick = async () => { if (await saveSettings({ language: $("lang").value }, $("saveLang"), null)) location.reload(); };
+
+// ---------- Start ----------
+(async () => {
+  try { ST = await api("state"); setLang(ST.settings.language); } catch { setLang("auto"); }
+  translateDom();
+  show(VIEW);
+  if (ST) render();
+  refresh();
+})();
+</script>
+</body>
+</html>

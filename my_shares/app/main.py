@@ -1,0 +1,381 @@
+"""My Shares – Home-Assistant-App: Aktienliste mit Empfehlungsindex 0–10."""
+import asyncio
+import logging
+import os
+import re
+from datetime import datetime, timedelta
+
+from aiohttp import web
+
+from db import DB, DEFAULTS, now_iso
+from sources import SOURCE_KEYS, Fetcher, SourceError, evaluate
+
+VERSION = "1.0.0"
+DATA_DIR = os.environ.get("DATA_DIR", "/data")
+PORT = int(os.environ.get("PORT", "8099"))
+WWW = os.path.join(os.path.dirname(os.path.abspath(__file__)), "www")
+INGRESS_IPS = {"172.30.32.2", "127.0.0.1", "::1"}
+ALLOW_ALL = os.environ.get("ALLOW_ALL") == "1"
+PAUSE = float(os.environ.get("FETCH_PAUSE", "1.5"))   # Sekunden zwischen zwei Aktien
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+log = logging.getLogger("my_shares")
+
+
+class Engine:
+    def __init__(self, db):
+        self.db = db
+        self.running = False
+        self.progress = {"done": 0, "total": 0, "current": ""}
+        self.queue = set()
+        self.next_run = None
+        self.wake = asyncio.Event()
+
+    # ---------- Zeitplan ----------
+    def compute_next(self):
+        s = self.db.settings()
+        if not s.get("schedule_enabled") or not s.get("schedule_days"):
+            self.next_run = None
+            return
+        try:
+            hh, mm = (int(x) for x in str(s["schedule_time"]).split(":")[:2])
+        except ValueError:
+            hh, mm = 7, 30
+        now = datetime.now()
+        for add in range(0, 8):
+            d = (now + timedelta(days=add)).replace(hour=hh, minute=mm, second=0, microsecond=0)
+            if d > now and d.weekday() in s["schedule_days"]:
+                self.next_run = d
+                return
+        self.next_run = None
+
+    async def scheduler(self):
+        self.compute_next()
+        while True:
+            try:
+                await asyncio.wait_for(self.wake.wait(), timeout=20)
+            except asyncio.TimeoutError:
+                pass
+            self.wake.clear()
+            if self.next_run and datetime.now() >= self.next_run and not self.running:
+                log.info("Geplanter Lauf startet")
+                self.compute_next()
+                await self.run()
+            if self.queue and not self.running:
+                ids, self.queue = list(self.queue), set()
+                await self.run(ids)
+
+    def request(self, ids=None):
+        if ids:
+            self.queue.update(ids)
+        else:
+            self.queue.add(None)
+        self.wake.set()
+
+    # ---------- Berechnung ----------
+    async def run(self, ids=None):
+        if None in (ids or []):
+            ids = None
+        shares = self.db.shares()
+        if ids:
+            shares = [s for s in shares if s["id"] in ids]
+        if not shares:
+            return
+        self.running = True
+        self.progress = {"done": 0, "total": len(shares), "current": ""}
+        settings = self.db.settings()
+        f = Fetcher()
+        errors = 0
+        try:
+            for i, sh in enumerate(shares):
+                self.progress["current"] = sh.get("name") or sh["symbol"]
+                try:
+                    r = await evaluate(f, sh, settings)
+                    prev = sh["score"] if sh["score"] is not None else sh["score_prev"]
+                    self.db.update_share(sh["id"], **r, score_prev=prev, updated_at=now_iso(), error=None)
+                    self.db.add_history(sh["id"], r["score"], r["price"])
+                except SourceError as e:
+                    errors += 1
+                    self.db.update_share(sh["id"], error=e.msg or e.status, updated_at=now_iso())
+                    log.warning("%s: %s", sh["symbol"], e.msg)
+                except Exception as e:  # noqa: BLE001
+                    errors += 1
+                    log.exception("%s: unerwarteter Fehler", sh["symbol"])
+                    self.db.update_share(sh["id"], error=f"interner Fehler: {type(e).__name__}", updated_at=now_iso())
+                self.progress["done"] = i + 1
+                if i < len(shares) - 1:
+                    await asyncio.sleep(PAUSE)
+        finally:
+            await f.close()
+            self.running = False
+            self.progress["current"] = ""
+            self.db.set_meta("last_run", {"ts": now_iso(), "count": len(shares), "errors": errors, "all": not ids})
+            log.info("Lauf fertig: %d Aktien, %d Fehler", len(shares), errors)
+
+
+# ---------- Hilfsfunktionen ----------
+def label(score, s):
+    if score is None:
+        return "none"
+    if score >= float(s["buy_threshold"]):
+        return "buy"
+    if score <= float(s["sell_threshold"]):
+        return "sell"
+    return "hold"
+
+
+def public_settings(s):
+    out = {k: v for k, v in s.items() if not k.endswith("_key")}
+    out["finnhub_key_set"] = bool(s.get("finnhub_key"))
+    out["fmp_key_set"] = bool(s.get("fmp_key"))
+    return out
+
+
+def stats(shares, s):
+    scored = [x for x in shares if x["score"] is not None]
+    counts = {"buy": 0, "hold": 0, "sell": 0, "none": 0}
+    for x in shares:
+        counts[label(x["score"], s)] += 1
+    depot = {}
+    for x in shares:
+        if x.get("quantity") and x.get("price"):
+            cur = x.get("currency") or "EUR"
+            depot[cur] = depot.get(cur, 0) + x["quantity"] * x["price"]
+    # Gesamtbewertung: nach Depotwert gewichtet, wenn Stückzahlen da sind, sonst einfacher Mittelwert
+    wsum = sum(x["quantity"] * x["price"] for x in scored if x.get("quantity") and x.get("price"))
+    if wsum and len({x.get("currency") for x in scored if x.get("quantity")}) <= 1:
+        avg = sum(x["score"] * x["quantity"] * x["price"] for x in scored if x.get("quantity") and x.get("price")) / wsum
+        weighted = True
+    else:
+        avg = sum(x["score"] for x in scored) / len(scored) if scored else None
+        weighted = False
+    last = max([x["updated_at"] for x in shares if x.get("updated_at")] or [None])
+    return {"count": len(shares), "avg": round(avg, 1) if avg is not None else None, "weighted": weighted,
+            "counts": counts, "depot": depot, "last_update": last,
+            "errors": sum(1 for x in shares if x.get("error"))}
+
+
+def json_error(msg, status=400):
+    return web.json_response({"error": msg}, status=status)
+
+
+# ---------- Web ----------
+@web.middleware
+async def guard(request, handler):
+    if not ALLOW_ALL and request.remote not in INGRESS_IPS:
+        return web.Response(status=403, text="Nur über Home Assistant erreichbar")
+    if request.method not in ("GET", "HEAD") and request.headers.get("X-App") != "1":
+        return json_error("Header X-App fehlt", 403)
+    try:
+        return await handler(request)
+    except web.HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        log.exception("Fehler in %s", request.path)
+        return json_error(f"Interner Fehler: {type(e).__name__}", 500)
+
+
+def make_app(db, engine):
+    routes = web.RouteTableDef()
+
+    def static(name, ctype):
+        async def h(_request):
+            return web.FileResponse(os.path.join(WWW, name), headers={"Content-Type": ctype, "Cache-Control": "no-cache"})
+        return h
+
+    routes.get("/")(static("index.html", "text/html; charset=utf-8"))
+    routes.get("/lang-en.js")(static("lang-en.js", "application/javascript; charset=utf-8"))
+    routes.get("/favicon.svg")(static("favicon.svg", "image/svg+xml"))
+
+    @routes.get("/favicon.ico")
+    async def favicon_ico(_r):
+        return web.Response(status=204)
+
+    @routes.get("/api/state")
+    async def state(request):
+        s = db.settings()
+        shares = db.shares()
+        for x in shares:
+            x["label"] = label(x["score"], s)
+        user = request.headers.get("X-Remote-User-Display-Name") or request.headers.get("X-Remote-User-Name") or ""
+        return web.json_response({
+            "version": VERSION, "user": user, "running": engine.running, "progress": engine.progress,
+            "queued": bool(engine.queue), "next_run": engine.next_run.isoformat() if engine.next_run else None,
+            "last_run": db.meta("last_run"), "settings": public_settings(s), "stats": stats(shares, s),
+            "shares": shares, "now": now_iso()})
+
+    @routes.get("/api/shares/{id}")
+    async def share_detail(request):
+        sh = db.share(int(request.match_info["id"]))
+        if not sh:
+            return json_error("Aktie nicht gefunden", 404)
+        sh["label"] = label(sh["score"], db.settings())
+        sh["history"] = db.history(sh["id"])
+        return web.json_response(sh)
+
+    @routes.post("/api/lookup")
+    async def lookup(request):
+        body = await request.json()
+        q = str(body.get("query") or "").strip()
+        if len(q) < 2:
+            return json_error("Bitte WKN, ISIN oder Symbol eingeben")
+        f = Fetcher()
+        try:
+            res = await f.lookup(q)
+        except SourceError as e:
+            return json_error(e.msg, 502)
+        finally:
+            await f.close()
+        for r in res:
+            r["exists"] = db.find_symbol(r["symbol"]) is not None
+        return web.json_response({"results": res})
+
+    def parse_qty(v):
+        if v in (None, ""):
+            return None
+        try:
+            q = float(str(v).replace(",", "."))
+        except ValueError:
+            raise ValueError("Stückzahl ist keine Zahl") from None
+        if q < 0:
+            raise ValueError("Stückzahl darf nicht negativ sein")
+        return q
+
+    @routes.post("/api/shares")
+    async def add_share(request):
+        b = await request.json()
+        symbol = str(b.get("symbol") or "").strip().upper()
+        if not re.match(r"^[A-Z0-9.\-=^]{1,20}$", symbol):
+            return json_error("Ungültiges Symbol")
+        if db.find_symbol(symbol):
+            return json_error(f"{symbol} ist schon in der Liste")
+        try:
+            qty = parse_qty(b.get("quantity"))
+        except ValueError as e:
+            return json_error(str(e))
+        sid = db.add_share(str(b.get("ident") or symbol).strip().upper()[:20], symbol,
+                           str(b.get("name") or "")[:120] or None, str(b.get("exchange") or "")[:40] or None, qty)
+        engine.request([sid])
+        return web.json_response({"id": sid})
+
+    @routes.patch("/api/shares/{id}")
+    async def edit_share(request):
+        sid = int(request.match_info["id"])
+        sh = db.share(sid)
+        if not sh:
+            return json_error("Aktie nicht gefunden", 404)
+        b = await request.json()
+        fields = {}
+        if "quantity" in b:
+            try:
+                fields["quantity"] = parse_qty(b.get("quantity"))
+            except ValueError as e:
+                return json_error(str(e))
+        recalc = False
+        if "symbol" in b:
+            sym = str(b["symbol"] or "").strip().upper()
+            if not re.match(r"^[A-Z0-9.\-=^]{1,20}$", sym):
+                return json_error("Ungültiges Symbol")
+            other = db.find_symbol(sym)
+            if other and other != sid:
+                return json_error(f"{sym} ist schon in der Liste")
+            if sym != sh["symbol"]:
+                fields.update(symbol=sym, exchange=None)
+                recalc = True
+        db.update_share(sid, **fields)
+        if recalc:
+            engine.request([sid])
+        return web.json_response({"ok": True})
+
+    @routes.post("/api/shares/delete")
+    async def delete_shares(request):
+        b = await request.json()
+        ids = [int(x) for x in b.get("ids") or []]
+        db.delete_shares(ids)
+        return web.json_response({"deleted": len(ids)})
+
+    @routes.post("/api/run")
+    async def run(request):
+        b = await request.json() if request.can_read_body else {}
+        ids = [int(x) for x in (b.get("ids") or [])]
+        if not db.shares():
+            return json_error("Die Liste ist leer")
+        engine.request(ids or None)
+        return web.json_response({"ok": True})
+
+    @routes.get("/api/settings")
+    async def get_settings(_r):
+        return web.json_response(public_settings(db.settings()))
+
+    @routes.put("/api/settings")
+    async def put_settings(request):
+        b = await request.json()
+        cur = db.settings()
+        new = {}
+        if "schedule_enabled" in b:
+            new["schedule_enabled"] = bool(b["schedule_enabled"])
+        if "schedule_time" in b:
+            if not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", str(b["schedule_time"])):
+                return json_error("Uhrzeit bitte als hh:mm angeben")
+            new["schedule_time"] = b["schedule_time"]
+        if "schedule_days" in b:
+            days = sorted({int(d) for d in b["schedule_days"] if 0 <= int(d) <= 6})
+            new["schedule_days"] = days
+        for k in ("finnhub_key", "fmp_key"):
+            if b.get(k + "_clear"):
+                new[k] = ""
+            elif b.get(k):
+                v = str(b[k]).strip()
+                if not re.match(r"^[A-Za-z0-9_\-]{8,80}$", v):
+                    return json_error("Der API-Key enthält ungültige Zeichen")
+                new[k] = v
+        if "weights" in b:
+            w = dict(cur["weights"])
+            for k in SOURCE_KEYS:
+                if k in b["weights"]:
+                    try:
+                        v = float(b["weights"][k])
+                    except (TypeError, ValueError):
+                        return json_error("Gewichte müssen Zahlen sein")
+                    if not 0 <= v <= 5:
+                        return json_error("Gewichte liegen zwischen 0 und 5")
+                    w[k] = v
+            new["weights"] = w
+        if "min_sources" in b:
+            m = int(b["min_sources"])
+            if not 1 <= m <= 5:
+                return json_error("Mindestanzahl Quellen liegt zwischen 1 und 5")
+            new["min_sources"] = m
+        buy = float(b.get("buy_threshold", cur["buy_threshold"]))
+        sell = float(b.get("sell_threshold", cur["sell_threshold"]))
+        if "buy_threshold" in b or "sell_threshold" in b:
+            if not (0 <= sell < buy <= 10):
+                return json_error("„Verkaufen bis“ muss kleiner sein als „Kaufen ab“ (0–10)")
+            new["buy_threshold"], new["sell_threshold"] = buy, sell
+        if "language" in b:
+            if b["language"] not in ("auto", "de", "en"):
+                return json_error("Unbekannte Sprache")
+            new["language"] = b["language"]
+        db.save_settings(new)
+        engine.compute_next()
+        return web.json_response(public_settings(db.settings()))
+
+    app = web.Application(middlewares=[guard], client_max_size=64 * 1024)
+    app.add_routes(routes)
+    return app
+
+
+async def main():
+    db = DB(os.path.join(DATA_DIR, "my_shares.db"))
+    engine = Engine(db)
+    app = make_app(db, engine)
+    runner = web.AppRunner(app, access_log=None)
+    await runner.setup()
+    await web.TCPSite(runner, "0.0.0.0", PORT).start()
+    log.info("My Shares %s läuft auf Port %d (Daten: %s)", VERSION, PORT, DATA_DIR)
+    await engine.scheduler()
+
+
+if __name__ == "__main__":
+    assert set(DEFAULTS["weights"]) == set(SOURCE_KEYS)
+    asyncio.run(main())

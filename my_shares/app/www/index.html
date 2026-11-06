@@ -298,7 +298,7 @@ td input[type=number] { width: 80px; }
   <section id="view-list" class="stack" style="gap:16px" aria-labelledby="listTitle">
     <div class="notice info" id="keyNotice" hidden>
       <svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
-      <span>Finnhub und FMP liefern erst mit einem kostenlosen API-Key Daten.</span>
+      <span>Finnhub und Alpha Vantage liefern erst mit einem kostenlosen API-Key Daten (nur für US-Aktien).</span>
       <span class="right"><button class="btn small" data-goto="settings">Keys eintragen …</button><button class="linkbtn" id="hideKeyNotice">Ausblenden</button></span>
     </div>
 
@@ -345,26 +345,28 @@ td input[type=number] { width: 80px; }
               <tbody>
                 <tr><td><div class="t">Yahoo Finance – Analysten</div><div class="sub">Konsens der Analysten (1–5) und Anzahl</div></td><td class="mid"><span class="badge">ohne Key</span></td>
                   <td class="num mid"><input type="number" min="0" max="5" step="0.5" data-w="yahoo" aria-label="Gewicht Yahoo"></td></tr>
-                <tr><td><div class="t">Finnhub – Empfehlungen</div><div class="sub">Stark kaufen bis stark verkaufen, monatlich</div>
+                <tr><td><div class="t">Finnhub – Empfehlungen</div><div class="sub">Stark kaufen bis stark verkaufen, monatlich · nur US-Aktien</div>
                     <div class="keyrow" style="margin-top:8px"><input type="password" id="finnhubKey" autocomplete="off" placeholder="neuer API-Key" aria-label="Finnhub API-Key">
                       <button class="linkbtn" id="finnhubClear" hidden>Key entfernen</button></div>
                     <div class="sub" style="margin-top:4px"><a href="https://finnhub.io/register" target="_blank" rel="noopener">Kostenlosen Key holen</a></div></td>
                   <td class="mid"><span class="badge" id="finnhubBadge">kein Key</span></td>
                   <td class="num mid"><input type="number" min="0" max="5" step="0.5" data-w="finnhub" aria-label="Gewicht Finnhub"></td></tr>
-                <tr><td><div class="t">FMP – Einstufungen</div><div class="sub">Konsens der Einstufungen und Kursziel</div>
-                    <div class="keyrow" style="margin-top:8px"><input type="password" id="fmpKey" autocomplete="off" placeholder="neuer API-Key" aria-label="FMP API-Key">
-                      <button class="linkbtn" id="fmpClear" hidden>Key entfernen</button></div>
-                    <div class="sub" style="margin-top:4px"><a href="https://site.financialmodelingprep.com/register" target="_blank" rel="noopener">Kostenlosen Key holen</a></div></td>
-                  <td class="mid"><span class="badge" id="fmpBadge">kein Key</span></td>
-                  <td class="num mid"><input type="number" min="0" max="5" step="0.5" data-w="fmp" aria-label="Gewicht FMP"></td></tr>
-                <tr><td><div class="t">Kursziel-Potenzial</div><div class="sub">Abstand des Kurses zum Kursziel der Analysten (±30 % = 0 bzw. 10)</div></td><td class="mid"><span class="badge">aus Yahoo / FMP</span></td>
+                <tr><td><div class="t">Alpha Vantage – Analysten</div><div class="sub">Einstufungen und Kursziel · nur US-Aktien · 25 Abrufe pro Tag</div>
+                    <div class="keyrow" style="margin-top:8px"><input type="password" id="avKey" autocomplete="off" placeholder="neuer API-Key" aria-label="Alpha Vantage API-Key">
+                      <button class="linkbtn" id="avClear" hidden>Key entfernen</button></div>
+                    <div class="sub" style="margin-top:4px"><a href="https://www.alphavantage.co/support/#api-key" target="_blank" rel="noopener">Kostenlosen Key holen</a></div></td>
+                  <td class="mid"><span class="badge" id="avBadge">kein Key</span></td>
+                  <td class="num mid"><input type="number" min="0" max="5" step="0.5" data-w="alphavantage" aria-label="Gewicht Alpha Vantage"></td></tr>
+                <tr><td><div class="t">MarketScreener – Konsens</div><div class="sub">Konsens der Analysten und Kursziel · alle Aktien, auch Deutschland und Europa</div></td><td class="mid"><span class="badge">ohne Key</span></td>
+                  <td class="num mid"><input type="number" min="0" max="5" step="0.5" data-w="marketscreener" aria-label="Gewicht MarketScreener"></td></tr>
+                <tr><td><div class="t">Kursziel-Potenzial</div><div class="sub">Abstand des Kurses zum mittleren Kursziel der Analysten (±30 % = 0 bzw. 10)</div></td><td class="mid"><span class="badge">aus den Analysten-Quellen</span></td>
                   <td class="num mid"><input type="number" min="0" max="5" step="0.5" data-w="target" aria-label="Gewicht Kursziel"></td></tr>
                 <tr><td><div class="t">Technik</div><div class="sub">200-Tage-Linie, Momentum 3 und 12 Monate, RSI</div></td><td class="mid"><span class="badge">aus Kursverlauf</span></td>
                   <td class="num mid"><input type="number" min="0" max="5" step="0.5" data-w="technical" aria-label="Gewicht Technik"></td></tr>
               </tbody>
             </table>
           </div>
-          <p class="hint">Liefert eine Quelle keine Daten, verteilt sich ihr Gewicht auf die anderen. Die kostenlosen Tarife von Finnhub und FMP decken vor allem US-Aktien ab.</p>
+          <p class="hint">Liefert eine Quelle keine Daten, verteilt sich ihr Gewicht auf die anderen. Finnhub und Alpha Vantage werden nur für US-Aktien abgefragt, weil die kostenlosen Tarife nichts anderes liefern.</p>
           <p class="field-err" id="srcErr" hidden></p>
           <div class="actions"><button class="btn primary" id="saveSrc">Speichern</button></div>
         </section>
@@ -494,8 +496,10 @@ td input[type=number] { width: 80px; }
 "use strict";
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const SRC = ["yahoo", "finnhub", "fmp", "target", "technical"];
-const SRC_NAME = { yahoo: "Yahoo Finance – Analysten", finnhub: "Finnhub – Empfehlungen", fmp: "FMP – Einstufungen",
+const SRC = ["yahoo", "finnhub", "alphavantage", "marketscreener", "target", "technical"];
+const KEYED = { finnhub: "finnhub", alphavantage: "av" };     // Quellen mit API-Key -> Prefix der Einstellung
+const SRC_NAME = { yahoo: "Yahoo Finance – Analysten", finnhub: "Finnhub – Empfehlungen", alphavantage: "Alpha Vantage – Analysten",
+  marketscreener: "MarketScreener – Konsens",
   target: "Kursziel-Potenzial", technical: "Technik" };
 const ICON = {
   edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/>',
@@ -698,13 +702,13 @@ function render() {
 
   // Hinweis auf fehlende Keys
   let hidden = false; try { hidden = localStorage.getItem("ms-hide-keys") === "1"; } catch {}
-  const missing = (!set.finnhub_key_set && set.weights.finnhub > 0) || (!set.fmp_key_set && set.weights.fmp > 0);
+  const missing = Object.entries(KEYED).some(([k, p]) => !set[p + "_key_set"] && set.weights[k] > 0);
   $("keyNotice").hidden = !missing || hidden;
 
   // Fakten
-  const active = SRC.filter(k => set.weights[k] > 0 && !((k === "finnhub" && !set.finnhub_key_set) || (k === "fmp" && !set.fmp_key_set))).length;
+  const active = SRC.filter(k => set.weights[k] > 0 && !(KEYED[k] && !set[KEYED[k] + "_key_set"])).length;
   $("facts").innerHTML = [
-    `<span><b>${active}</b> ${esc(t("von 5 Quellen aktiv"))}</span>`,
+    `<span><b>${active}</b> ${esc(t("von {m} Quellen aktiv", { m: SRC.length }))}</span>`,
     `<span>${esc(t("Nächster Lauf"))} <b>${ST.next_run ? esc(dt(ST.next_run)) : esc(t("aus"))}</b></span>`,
   ].join("");
 
@@ -802,7 +806,7 @@ function renderRows() {
       <td class="mid">${pill(sh)}</td>
       <td class="num mid">${deltaHtml(delta(sh))}</td>
       ${own}
-      <td class="nw">${esc(dt(sh.updated_at))}<div class="sub">${esc(t("{n} von 5 Quellen", { n: sh.nsources || 0 }))}</div></td>
+      <td class="nw">${esc(dt(sh.updated_at))}<div class="sub">${esc(t("{n} von {m} Quellen", { n: sh.nsources || 0, m: SRC.length }))}</div></td>
       <td class="num mid"><span class="row-actions">
         <button class="icon-btn" data-act="edit" aria-label="${esc(t("Details"))}" title="${esc(t("Details"))}">${icon("edit")}</button>
         <button class="icon-btn" data-act="move" aria-label="${esc(t(moveLbl))}" title="${esc(t(moveLbl))}">${icon(lst === "depot" ? "eye" : "wallet")}</button>
@@ -957,12 +961,15 @@ function srcData(k, s, cur) {
   switch (s.status) {
     case "off": return t("abgeschaltet (Gewicht 0)");
     case "nokey": return t("kein API-Key");
+    case "usonly": return t("nur für US-Aktien");
+    case "limit": return t(s.msg || "Tageslimit erreicht");
     case "nodata": return t("keine Daten");
     case "noaccess": return t("kein Zugriff im kostenlosen Tarif") + (s.msg ? ` (${s.msg})` : "");
     case "error": return t("Fehler") + ": " + t(s.msg || "");
   }
   if (k === "yahoo") return t("Ø {m} auf der Skala 1 (stark kaufen) bis 5 · {n} Analysten", { m: nf(s.mean, 2), n: s.n });
-  if (k === "finnhub" || k === "fmp") {
+  if (k === "marketscreener") return t("Konsens „{l}“ · {n} Analysten", { l: s.label, n: s.n }) + (s.pot != null ? " · " + t("Potenzial {p}", { p: pct(s.pot) }) : "");
+  if (k === "finnhub" || k === "alphavantage") {
     const [sb, b, h, se, ss] = s.counts || [];
     return t("{sb} stark kaufen · {b} kaufen · {h} halten · {s} verkaufen · {ss} stark verkaufen", { sb, b, h, s: se, ss }) + (s.period ? " · " + s.period : "");
   }
@@ -1032,7 +1039,7 @@ async function openDetail(id) {
   $("detBody").innerHTML = `
     <div class="score-big"><b>${sh.score == null ? "–" : esc(nf(sh.score))}</b>${pill(sh)}
       <span class="badge">${esc(t(depot ? "Depot" : "Beobachten"))}</span>
-      <span class="hint">${esc(t("aus {n} von 5 Quellen", { n: sh.nsources || 0 }))}${sh.analysts ? " · " + esc(t("{n} Analysten", { n: sh.analysts })) : ""}</span></div>
+      <span class="hint">${esc(t("aus {n} von {m} Quellen", { n: sh.nsources || 0, m: SRC.length }))}${sh.analysts ? " · " + esc(t("{n} Analysten", { n: sh.analysts })) : ""}</span></div>
     ${sh.error ? `<div class="notice bad">${esc(t(sh.error))}</div>` : ""}
     <div class="detail-grid">
       <dl class="kv">
@@ -1052,8 +1059,10 @@ async function openDetail(id) {
     <div class="form-grid">
       ${fields}
       <label class="f">${esc(t("Symbol (Yahoo)"))}<input type="text" id="detSym" value="${esc(sh.symbol)}" autocomplete="off"></label>
+      <label class="f" style="grid-column:1/-1">${esc(t("MarketScreener-Seite"))}<input type="url" id="detMs" value="${esc(sh.ms_url || "")}" placeholder="${esc(t("wird automatisch gesucht"))}" autocomplete="off"></label>
     </div>
-    <p class="hint" style="margin:-6px 0 0">${esc(t("Symbol nur ändern, wenn die Zuordnung falsch ist, z. B. SAP.DE für Xetra oder SAP für die USA."))}</p>
+    <p class="hint" style="margin:-6px 0 0">${esc(t("Symbol nur ändern, wenn die Zuordnung falsch ist, z. B. SAP.DE für Xetra oder SAP für die USA."))}
+      ${sh.ms_url ? `<a href="${esc(sh.ms_url)}consensus/" target="_blank" rel="noopener">${esc(t("Konsens auf MarketScreener öffnen"))}</a>` : esc(t("Hat MarketScreener die falsche Aktie gefunden, trage die Adresse ihrer Seite ein."))}</p>
     <p class="field-err" id="detErr" hidden></p>`;
   curLabels($("detBody"));
   ($("detQty") || $("detWish")).focus({ preventScroll: true });
@@ -1062,7 +1071,7 @@ $("detForm").onsubmit = async e => {
   e.preventDefault();
   if (!DET) return;
   showErr($("detErr"));
-  const body = { symbol: $("detSym").value.trim() };
+  const body = { symbol: $("detSym").value.trim(), ms_url: $("detMs").value.trim() };
   if (DET.list === "depot") { body.quantity = $("detQty").value.trim(); body.buy_price = $("detBuy").value.trim(); }
   else body.wish_price = $("detWish").value.trim();
   try {
@@ -1088,7 +1097,7 @@ function fillSettings() {
   }).join("");
   $("nextRunHint").textContent = ST.next_run ? t("Nächster Lauf: {t}", { t: dt(ST.next_run) }) : t("Kein Lauf geplant.");
   document.querySelectorAll("[data-w]").forEach(i => i.value = s.weights[i.dataset.w]);
-  for (const k of ["finnhub", "fmp"]) {
+  for (const k of ["finnhub", "av"]) {
     const set = s[k + "_key_set"];
     $(k + "Badge").textContent = t(set ? "Key gespeichert" : "kein Key");
     $(k + "Badge").className = "badge" + (set ? " accent" : "");
@@ -1124,10 +1133,10 @@ $("savePlan").onclick = () => saveSettings({
 $("saveSrc").onclick = () => {
   const weights = {}; document.querySelectorAll("[data-w]").forEach(i => weights[i.dataset.w] = i.value);
   const body = { weights };
-  for (const k of ["finnhub", "fmp"]) { const v = $(k + "Key").value.trim(); if (v) body[k + "_key"] = v; }
+  for (const k of ["finnhub", "av"]) { const v = $(k + "Key").value.trim(); if (v) body[k + "_key"] = v; }
   saveSettings(body, $("saveSrc"), $("srcErr"));
 };
-for (const k of ["finnhub", "fmp"]) {
+for (const k of ["finnhub", "av"]) {
   $(k + "Clear").onclick = async () => {
     if (await ask(t("Key entfernen?"), t("Ohne Key liefert diese Quelle keine Daten mehr."), t("Entfernen"), true))
       saveSettings({ [k + "_key_clear"]: true }, $("saveSrc"), $("srcErr"), t("Key entfernt"));

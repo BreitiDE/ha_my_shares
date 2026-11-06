@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.0
+
+- Neue Quelle **MarketScreener**: Analystenkonsens, Zahl der Analysten und Kursziel für alle Aktien, auch Deutschland und Europa.
+  Die Seite der Aktie wird automatisch gesucht und am Kurs geprüft; im Detail-Dialog lässt sie sich korrigieren
+- Neue Quelle **Alpha Vantage** (kostenloser Key) statt FMP: Einstufungen und Kursziel für US-Aktien.
+  Höchstens 25 Abrufe pro Tag, 13 s Abstand, Ergebnisse werden 20 h zwischengespeichert
+- FMP entfernt: der kostenlose Tarif liefert nur rund 87 große US-Werte
+- Finnhub und Alpha Vantage werden nur noch für US-Aktien abgefragt; bei anderen Aktien steht „nur für US-Aktien“ statt eines Fehlers
+- Kursziel-Potenzial ist jetzt der Mittelwert der Kursziele aller Analysten-Quellen
+- Damit 6 Quellen: Yahoo, Finnhub, Alpha Vantage, MarketScreener, Kursziel-Potenzial, Technik
+
 ## 1.1.0
 
 - Neue Liste „Beobachten“ für Aktien, die nicht im Depot sind; Bewertung wie im Depot

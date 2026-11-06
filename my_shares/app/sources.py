@@ -4,15 +4,19 @@
 Alle Abrufe laufen über curl_cffi mit Chrome-Fingerabdruck, weil Yahoo
 einfache HTTP-Clients mit HTTP 429 abweist.
 """
+import asyncio
 import logging
 import re
+from datetime import datetime, timedelta
+from urllib.parse import quote
 
 from curl_cffi.requests import AsyncSession
 
 log = logging.getLogger("my_shares.sources")
 
 TIMEOUT = 20
-SOURCE_KEYS = ("yahoo", "finnhub", "fmp", "target", "technical")
+SOURCE_KEYS = ("yahoo", "finnhub", "alphavantage", "marketscreener", "target", "technical")
+US_ONLY = ("finnhub", "alphavantage")      # kostenlose Tarife decken nur US-Aktien ab
 
 # Bloomberg-Börsencodes (OpenFIGI) -> Yahoo-Endung und Anzeigename
 EXCHANGES = {
@@ -41,6 +45,58 @@ class SourceError(Exception):
         super().__init__(msg or status)
         self.status = status
         self.msg = msg
+
+
+def is_us(symbol):
+    """Yahoo-Symbole von US-Börsen haben keine Börsen-Endung (.DE, .L, …)."""
+    return "." not in symbol and not symbol.startswith("^")
+
+
+def parse_en_number(txt):
+    return float(txt.replace(",", ""))
+
+
+# MarketScreener-Konsens -> Skala 1 (stark kaufen) … 5 (stark verkaufen)
+MS_CONSENSUS = {"BUY": 1, "STRONG BUY": 1, "OUTPERFORM": 2, "ACCUMULATE": 2, "OVERWEIGHT": 2,
+                "HOLD": 3, "NEUTRAL": 3, "UNDERPERFORM": 4, "REDUCE": 4, "UNDERWEIGHT": 4, "SELL": 5, "STRONG SELL": 5}
+MS_BASE = "https://www.marketscreener.com"
+MS_QUOTE_RE = re.compile(r"/quote/stock/([A-Za-z0-9\-]+-\d+)/")
+
+
+MS_ANY_RE = re.compile(r"marketscreener\.com/[a-z]+/[a-z]+/([A-Za-z0-9\-]+-\d+)(?:/|$|\?)")
+
+
+def ms_normalize(url):
+    """Beliebige MarketScreener-Adresse einer Aktie (auch de./uk./…, /kurs/aktie/) -> www.…/quote/stock/NAME-ID/"""
+    m = MS_ANY_RE.search(url or "")
+    return f"{MS_BASE}/quote/stock/{m.group(1)}/" if m else None
+
+
+def html_text(html):
+    html = re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\1>", " ", html)
+    txt = re.sub(r"(?s)<[^>]+>", " ", html)
+    txt = txt.replace("&nbsp;", " ").replace("&amp;", "&")
+    return re.sub(r"\s+", " ", txt)
+
+
+def parse_ms_consensus(html):
+    """Liest Konsens, Analystenzahl, letzten Kurs und mittleres Kursziel aus der Konsens-Seite."""
+    t = html_text(html)
+    m = re.search(r"Mean consensus\s+([A-Za-z][A-Za-z ]{1,20}?)\s+Number of Analysts\s+(\d+)", t)
+    if not m:
+        raise SourceError("nodata", "kein Analystenkonsens auf der Seite")
+    label = m.group(1).strip().upper()
+    if label not in MS_CONSENSUS:
+        raise SourceError("nodata", f"unbekannte Einstufung „{label}“")
+    out = {"label": label, "n": int(m.group(2)), "mean": MS_CONSENSUS[label]}
+    num = r"([0-9][0-9,]*(?:\.[0-9]+)?)\s*([A-Z]{3})"
+    lc = re.search(r"Last Close Price\s+" + num, t)
+    at = re.search(r"Average target price\s+" + num, t)
+    if lc and at and lc.group(2) == at.group(2):
+        last, avg = parse_en_number(lc.group(1)), parse_en_number(at.group(1))
+        if last > 0:
+            out.update(last=last, target=avg, currency=at.group(2), pot=avg / last - 1)
+    return out
 
 
 def clamp(x):
@@ -280,49 +336,178 @@ class Fetcher:
             raise SourceError("nodata")
         return data[0]
 
-    # ---------- Financial Modeling Prep ----------
-    async def fmp(self, symbol, key):
-        data = await self._json("GET", "https://financialmodelingprep.com/stable/grades-consensus",
-                                params={"symbol": symbol, "apikey": key})
-        if isinstance(data, dict):
-            msg = data.get("Error Message") or data.get("error") or ""
-            raise SourceError("noaccess" if msg else "nodata", str(msg)[:80])
-        if not data:
+    # ---------- Alpha Vantage (nur US) ----------
+    async def alphavantage(self, symbol, key):
+        data = await self._json("GET", "https://www.alphavantage.co/query",
+                                params={"function": "OVERVIEW", "symbol": symbol, "apikey": key})
+        if not isinstance(data, dict):
+            raise SourceError("error", "unerwartete Antwort")
+        msg = data.get("Information") or data.get("Note") or data.get("Error Message")
+        if msg:
+            low = msg.lower()
+            if "rate limit" in low or "per day" in low or "frequency" in low:
+                raise SourceError("limit", "Tageslimit von Alpha Vantage erreicht")
+            if "apikey" in low or "api key" in low:
+                raise SourceError("noaccess", "API-Key ungültig")
+            raise SourceError("error", msg[:80])
+        if not data.get("Symbol"):
             raise SourceError("nodata")
-        out = dict(data[0])
+
+        def num(k):
+            v = data.get(k)
+            try:
+                return float(v) if v not in (None, "", "None", "-") else None
+            except ValueError:
+                return None
+        keys = ("AnalystRatingStrongBuy", "AnalystRatingBuy", "AnalystRatingHold", "AnalystRatingSell", "AnalystRatingStrongSell")
+        counts = dict(zip(("strongBuy", "buy", "hold", "sell", "strongSell"), (int(num(k) or 0) for k in keys)))
+        return {**counts, "target": num("AnalystTargetPrice")}
+
+    # ---------- MarketScreener ----------
+    async def _ms_get(self, url):
         try:
-            pt = await self._json("GET", "https://financialmodelingprep.com/stable/price-target-consensus",
-                                  params={"symbol": symbol, "apikey": key})
-            if isinstance(pt, list) and pt:
-                out["target"] = pt[0].get("targetConsensus")
-        except SourceError:
-            pass
-        return out
+            r = await self.s.get(url, headers={"Accept-Language": "en-US,en;q=0.9"}, allow_redirects=True)
+        except Exception as e:  # noqa: BLE001
+            raise SourceError("error", f"nicht erreichbar ({type(e).__name__})") from e
+        if r.status_code in (403, 429, 503):
+            raise SourceError("error", f"MarketScreener blockt den Abruf (HTTP {r.status_code})")
+        if r.status_code == 404:
+            raise SourceError("nodata", "Seite nicht gefunden")
+        if r.status_code >= 400:
+            raise SourceError("error", f"HTTP {r.status_code}")
+        return r
+
+    async def ms_search(self, query):
+        """Kandidaten-Adressen (Reihenfolge wie auf der Suchseite)."""
+        r = await self._ms_get(f"{MS_BASE}/search/?q={quote(query)}")
+        direct = ms_normalize(str(r.url))
+        if direct:
+            return [direct]
+        seen, out = set(), []
+        for m in MS_QUOTE_RE.finditer(r.text):
+            u = f"{MS_BASE}/quote/stock/{m.group(1)}/"
+            if u not in seen:
+                seen.add(u)
+                out.append(u)
+        return out[:6]
+
+    async def ms_consensus(self, base_url):
+        r = await self._ms_get(base_url + "consensus/")
+        return parse_ms_consensus(r.text)
+
+class AVGate:
+    """Alpha Vantage, kostenloser Tarif: 25 Abrufe pro Tag, 5 pro Minute.
+    Ergebnisse werden 20 h zwischengespeichert, damit „Neu berechnen“ keine Abrufe verbraucht."""
+
+    DAILY = 25
+    GAP = 13.0          # Sekunden zwischen zwei Abrufen
+
+    def __init__(self, db):
+        self.db = db
+        self.last = None
+
+    async def get(self, f, symbol, key):
+        now = datetime.now()
+        cache = {k: v for k, v in (self.db.meta("av_cache") or {}).items()
+                 if now - datetime.fromisoformat(v["ts"]) < timedelta(days=3)}
+        hit = cache.get(symbol)
+        if hit and now - datetime.fromisoformat(hit["ts"]) < timedelta(hours=20):
+            return hit["data"]
+        today = now.date().isoformat()
+        use = self.db.meta("av_usage") or {}
+        if use.get("date") != today:
+            use = {"date": today, "count": 0}
+        if use["count"] >= self.DAILY:
+            raise SourceError("limit", "Tageslimit von Alpha Vantage erreicht")
+        if self.last:
+            wait = self.GAP - (datetime.now() - self.last).total_seconds()
+            if wait > 0:
+                await asyncio.sleep(wait)
+        self.last = datetime.now()
+        use["count"] += 1
+        self.db.set_meta("av_usage", use)
+        try:
+            data = await f.alphavantage(symbol, key)
+        except SourceError as e:
+            if e.status == "limit":
+                use["count"] = self.DAILY
+                self.db.set_meta("av_usage", use)
+            raise
+        cache[symbol] = {"ts": now.replace(microsecond=0).isoformat(), "data": data}
+        self.db.set_meta("av_cache", cache)
+        return data
 
 
-async def evaluate(f, share, settings):
+async def ms_resolve(f, share, name, price, currency, fx):
+    """Sucht die MarketScreener-Seite einer Aktie und prüft sie am Kurs (oder am Namen)."""
+    from fx import convert
+    queries = []
+    ident = (share.get("ident") or "").upper()
+    if ISIN_RE.match(ident):
+        queries.append(ident)
+    if name:
+        queries.append(name)
+    base = share["symbol"].split(".")[0]
+    if base not in queries:
+        queries.append(base)
+    word = re.sub(r"[^a-z0-9]", "", (name or base).split()[0].lower())
+    for q in queries[:2]:
+        try:
+            cands = await f.ms_search(q)
+        except SourceError as e:
+            if e.status == "error":
+                raise
+            continue
+        for url in cands[:3]:
+            await asyncio.sleep(1)
+            try:
+                cons = await f.ms_consensus(url)
+            except SourceError as e:
+                if e.status == "error":
+                    raise
+                continue
+            slug = url.rstrip("/").rsplit("/", 1)[-1].lower().replace("-", "")
+            ok = False
+            if cons.get("last"):
+                last = convert(cons["last"], cons["currency"], currency, fx)
+                ok = last is not None and 0.75 < last / price < 1.33
+                if last is None:                      # Währung nicht umrechenbar: Name muss passen
+                    ok = bool(word) and word in slug
+            else:
+                ok = bool(word) and word in slug
+            if ok:
+                return url, cons
+    raise SourceError("nodata", "Aktie auf MarketScreener nicht gefunden")
+
+
+async def evaluate(f, share, settings, ctx=None):
     """Holt alle Quellen für eine Aktie und berechnet den Index.
 
-    Gibt ein Dict mit Feldern für die Tabelle shares zurück.
-    Ohne Kurs (Yahoo-Chart) wird SourceError geworfen.
+    ctx: {"fx": Wechselkurse, "av": AVGate}. Ohne Kurs (Yahoo-Chart) wird SourceError geworfen.
     """
+    ctx = ctx or {}
     sym = share["symbol"]
     w = settings["weights"]
+    us = is_us(sym)
     src = {}
+    ms_url = share.get("ms_url")
 
     def off(k):
         return float(w.get(k) or 0) <= 0
 
     chart = await f.yahoo_chart(sym)
     price = chart["price"]
+    name = chart["name"] or share.get("name") or sym
+    pots = []          # Kursziel-Potenziale aller Quellen
 
     # 1 Yahoo-Analystenkonsens
-    ysum = None
     if off("yahoo"):
         src["yahoo"] = {"status": "off"}
     else:
         try:
             ysum = await f.yahoo_summary(sym)
+            if ysum.get("target"):
+                pots.append(ysum["target"] / price - 1)
             if ysum["mean"]:
                 src["yahoo"] = {"status": "ok", "score": round(clamp((5 - ysum["mean"]) / 4 * 10), 2),
                                 "mean": ysum["mean"], "n": ysum["n"]}
@@ -331,45 +516,72 @@ async def evaluate(f, share, settings):
         except SourceError as e:
             src["yahoo"] = {"status": e.status, "msg": e.msg}
 
-    # 2 Finnhub, 3 FMP
-    fmp_target = None
-    for k, fn, key in (("finnhub", f.finnhub, settings.get("finnhub_key")), ("fmp", f.fmp, settings.get("fmp_key"))):
+    # 2 Finnhub, 3 Alpha Vantage – nur US-Aktien
+    for k, key in (("finnhub", settings.get("finnhub_key")), ("alphavantage", settings.get("av_key"))):
         if off(k):
             src[k] = {"status": "off"}
+            continue
+        if not us:
+            src[k] = {"status": "usonly"}
             continue
         if not key:
             src[k] = {"status": "nokey"}
             continue
         try:
-            d = await fn(sym, key)
+            if k == "finnhub":
+                d = await f.finnhub(sym, key)
+            elif ctx.get("av"):
+                d = await ctx["av"].get(f, sym, key)
+            else:
+                d = await f.alphavantage(sym, key)
             sc, n = counts_score(d)
             if sc is None:
                 src[k] = {"status": "nodata"}
             else:
                 src[k] = {"status": "ok", "score": sc, "n": n, "period": d.get("period"),
                           "counts": [int(d.get(x) or 0) for x in ("strongBuy", "buy", "hold", "sell", "strongSell")]}
-            if k == "fmp":
-                fmp_target = d.get("target")
+            if d.get("target") and 0.2 < d["target"] / price < 5:
+                pots.append(d["target"] / price - 1)
         except SourceError as e:
             src[k] = {"status": e.status, "msg": e.msg}
 
-    # 4 Kursziel-Potenzial (Yahoo, ggf. FMP)
-    targets = []
-    if ysum and ysum.get("target"):
-        targets.append(ysum["target"])
-    if fmp_target and 0.2 < fmp_target / price < 5:
-        targets.append(fmp_target)
-    target = sum(targets) / len(targets) if targets else None
+    # 4 MarketScreener – alle Aktien
+    if off("marketscreener"):
+        src["marketscreener"] = {"status": "off"}
+    else:
+        try:
+            cons = None
+            if ms_url:
+                try:
+                    cons = await f.ms_consensus(ms_url)
+                except SourceError as e:
+                    if e.msg != "Seite nicht gefunden":
+                        raise
+                    ms_url = None                       # Seite verschwunden: neu suchen
+            if not ms_url:
+                ms_url, cons = await ms_resolve(f, share, name, price, chart["currency"], ctx.get("fx"))
+            src["marketscreener"] = {"status": "ok", "score": round(clamp((5 - cons["mean"]) / 4 * 10), 2),
+                                     "label": cons["label"], "n": cons["n"], "url": ms_url}
+            if cons.get("pot") is not None and -0.8 < cons["pot"] < 4:
+                pots.append(cons["pot"])
+                src["marketscreener"]["pot"] = cons["pot"]
+        except SourceError as e:
+            src["marketscreener"] = {"status": e.status, "msg": e.msg, "url": ms_url}
+
+    # 5 Kursziel-Potenzial (Mittel aller Quellen)
+    target = None
+    if pots:
+        pot = sum(pots) / len(pots)
+        target = price * (1 + pot)
     if off("target"):
         src["target"] = {"status": "off"}
-    elif target:
-        pot = target / price - 1
+    elif pots:
         src["target"] = {"status": "ok", "score": round(lin(pot, 0.30), 2), "target": target, "price": price,
-                         "pot": pot, "n": len(targets)}
+                         "pot": pot, "n": len(pots)}
     else:
         src["target"] = {"status": "nodata"}
 
-    # 5 eigene Technik
+    # 6 eigene Technik
     if off("technical"):
         src["technical"] = {"status": "off"}
     else:
@@ -387,9 +599,9 @@ async def evaluate(f, share, settings):
             den += wk
             used += 1
     score = round(num / den, 1) if den and used >= int(settings.get("min_sources") or 1) else None
-    analysts = max([s.get("n") or 0 for k, s in src.items() if k in ("yahoo", "finnhub", "fmp")] + [0])
+    analysts = max([s.get("n") or 0 for k, s in src.items() if k in ("yahoo", "finnhub", "alphavantage", "marketscreener")] + [0])
 
     return {"price": price, "currency": chart["currency"], "change_pct": chart["change_pct"],
-            "name": chart["name"] or share.get("name") or sym,
-            "exchange": share.get("exchange") or chart["exchange"],
-            "target": target, "score": score, "nsources": used, "analysts": analysts, "sources": src}
+            "name": name, "exchange": share.get("exchange") or chart["exchange"],
+            "target": target, "score": score, "nsources": used, "analysts": analysts, "sources": src,
+            "ms_url": ms_url}

@@ -10,8 +10,8 @@ DEFAULTS = {
     "schedule_time": "07:30",
     "schedule_days": [0, 1, 2, 3, 4],          # Mo–Fr
     "finnhub_key": "",
-    "fmp_key": "",
-    "weights": {"yahoo": 1.0, "finnhub": 1.0, "fmp": 1.0, "target": 1.0, "technical": 1.0},
+    "av_key": "",
+    "weights": {"yahoo": 1.0, "finnhub": 1.0, "alphavantage": 1.0, "marketscreener": 1.0, "target": 1.0, "technical": 1.0},
     "min_sources": 2,
     "buy_threshold": 6.5,
     "sell_threshold": 3.5,
@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS shares(
   added_at TEXT NOT NULL,
   list TEXT NOT NULL DEFAULT 'depot',
   buy_price REAL, buy_currency TEXT,
-  wish_price REAL, wish_currency TEXT
+  wish_price REAL, wish_currency TEXT,
+  ms_url TEXT
 );
 CREATE TABLE IF NOT EXISTS history(share_id INTEGER NOT NULL, ts TEXT NOT NULL, score REAL, price REAL);
 CREATE INDEX IF NOT EXISTS history_share ON history(share_id, ts);
@@ -46,13 +47,14 @@ CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT NOT NULL);
 
 SHARE_COLS = ("id", "ident", "symbol", "name", "exchange", "currency", "quantity", "price", "change_pct",
               "target", "score", "score_prev", "nsources", "analysts", "sources", "updated_at", "error", "added_at",
-              "list", "buy_price", "buy_currency", "wish_price", "wish_currency")
+              "list", "buy_price", "buy_currency", "wish_price", "wish_currency", "ms_url")
 
 # Spalten, die nach 1.0.0 dazugekommen sind (werden bei bestehenden Datenbanken ergänzt)
 MIGRATIONS = [
     ("list", "TEXT NOT NULL DEFAULT 'depot'"),
     ("buy_price", "REAL"), ("buy_currency", "TEXT"),
     ("wish_price", "REAL"), ("wish_currency", "TEXT"),
+    ("ms_url", "TEXT"),
 ]
 
 
@@ -83,9 +85,8 @@ class DB:
                     s[r["k"]] = json.loads(r["v"])
                 except ValueError:
                     pass
-        w = dict(DEFAULTS["weights"])
-        w.update(s.get("weights") or {})
-        s["weights"] = w
+        stored = s.get("weights") or {}
+        s["weights"] = {k: stored.get(k, v) for k, v in DEFAULTS["weights"].items()}   # alte Quellen (fmp) fallen weg
         return s
 
     def save_settings(self, values):

@@ -30,15 +30,21 @@ Kauf- und Wunschkurs gibst Du in der gewählten Währung ein.
 
 | Quelle | Zugang | Liefert |
 |---|---|---|
-| Yahoo Finance | ohne Key | Analystenkonsens (1–5), Kursziel, Kursverlauf |
-| Finnhub | kostenloser Key ([finnhub.io](https://finnhub.io/register)) | Empfehlungen pro Monat |
-| Financial Modeling Prep | kostenloser Key ([FMP](https://site.financialmodelingprep.com/register)) | Konsens der Einstufungen, Kursziel |
-| Kursziel-Potenzial | aus Yahoo / FMP | Abstand Kurs → Kursziel, ±30 % = 0 bzw. 10 |
+| Yahoo Finance | ohne Key | Analystenkonsens (1–5), Kursziel, Kursverlauf – alle Aktien |
+| Finnhub | kostenloser Key ([finnhub.io](https://finnhub.io/register)) | Empfehlungen pro Monat – nur US-Aktien |
+| Alpha Vantage | kostenloser Key ([alphavantage.co](https://www.alphavantage.co/support/#api-key)) | Einstufungen, Kursziel – nur US-Aktien, 25 Abrufe/Tag |
+| MarketScreener | ohne Key | Konsens, Zahl der Analysten, Kursziel – alle Aktien |
+| Kursziel-Potenzial | aus den Analysten-Quellen | Abstand Kurs → mittleres Kursziel, ±30 % = 0 bzw. 10 |
 | Technik | aus dem Kursverlauf | 200-Tage-Linie, Momentum 3 und 12 Monate, RSI |
+
+MarketScreener hat keine offizielle Schnittstelle; die App liest die öffentliche Konsens-Seite der Aktie
+(ein Abruf pro Aktie und Lauf). Die Seite wird beim ersten Lauf gesucht und am Kurs geprüft. Hat die App die
+falsche Aktie erwischt, trägst Du im Detail-Dialog die richtige Adresse ein (jede Sprachversion geht).
+Alpha Vantage speichert Ergebnisse 20 Stunden zwischen, damit „Neu berechnen“ das Tageslimit nicht aufbraucht.
 
 Jede Quelle wird auf 0–10 umgerechnet. Der Index ist der gewichtete Mittelwert der Quellen, die Daten
 liefern. Die Gewichte, die Grenzen für „Kaufen“ und „Verkaufen“ und die Mindestanzahl an Quellen stehen
-unter **Einstellungen**. Die kostenlosen Tarife von Finnhub und FMP decken vor allem US-Aktien ab.
+unter **Einstellungen**. Finnhub und Alpha Vantage werden nur für US-Aktien abgefragt, weil ihre kostenlosen Tarife nichts anderes liefern.
 
 ## Zeitplan
 
